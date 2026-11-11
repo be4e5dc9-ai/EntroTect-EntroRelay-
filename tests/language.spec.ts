@@ -9,7 +9,15 @@ test('follows Windows display language, switches in place, and persists the over
   const root = path.resolve('.local', `desktop-language-${Date.now()}`);
   const settingsFile = path.join(root, 'settings.json');
   await atomicJson(settingsFile, { defaultWorkspace: root });
-  const windowsLanguage = execFileSync('powershell.exe', ['-NoProfile', '-Command', '(Get-UICulture).Name'],
+  // PowerShell's own resource language can differ from the Windows display language.
+  const probe = `
+    $api = Add-Type -Name WindowsLanguage -Namespace EntroTectTest -PassThru -MemberDefinition '
+      [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+      public static extern ushort GetUserDefaultUILanguage();
+    '
+    [System.Globalization.CultureInfo]::GetCultureInfo([int]$api::GetUserDefaultUILanguage()).Name
+  `;
+  const windowsLanguage = execFileSync('powershell.exe', ['-NoProfile', '-Command', probe],
     { encoding: 'utf8', windowsHide: true }).trim();
   const system = /^zh(?:-|$)/i.test(windowsLanguage) ? 'zh-CN' : 'en';
   const override = system === 'en' ? 'zh-CN' : 'en';
