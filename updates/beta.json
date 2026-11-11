@@ -1,11 +1,11 @@
 {
-  "version": "0.8.0-beta.1",
-  "notes": "- 首个公开 Beta，Windows x64 安装版与便携版内置五种 Harness。\n- EntroRelay 支持跨 Harness 上下文转换、历史归档和按项目或对话控制同步目标。\n- 对话中的文件引用可在右侧栏打开，支持行号定位和高亮。\n- 新增独立网页预览，支持 localhost、前进后退、刷新和外部浏览器。\n- 优化流式回复时的项目列表渲染，无同步范围时跳过后台原生历史扫描。\n- 修复同一对话并发操作提前释放同步保护的问题。\n- 支持 Beta 更新源、安装包签名验证和应用内更新日志。\n- 项目采用 Apache-2.0。英文界面与英文使用文档已列入后续计划。",
-  "pub_date": "2026-11-11T11:52:31.022Z",
+  "version": "0.8.0-beta.2",
+  "notes": "- EntroTect 与 EntroRelay 新增英文界面。在「设置与连接 → 通用 → 界面语言」可选跟随 Windows、简体中文或 English，保存后立即生效。\n- 英文化覆盖项目与对话、文件和网页侧栏、历史同步、用量、连接设置、更新和应用提示。历史消息、原生输出和续聊上下文保持原文。\n- 提供完整英文 README、英文更新日志及双语 Beta 发布说明。\n\n<!-- entrotect:en -->\n\n- Added an English interface for EntroTect and its EntroRelay workflows. Choose Follow system, Simplified Chinese, or English in Settings and connections → General → Interface language. The change takes effect when you save.\n- Localized the workspace, project sidebar, history sync, usage, connection settings, updates, and app messages. Existing chat content, native Harness output, and resume context retain their original language.\n- Added a full English README, an English changelog, and bilingual Beta release notes.",
+  "pub_date": "2026-11-11T17:19:22.535Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWWIrU1pGci9CMmlZOTFWSitGV1dXOEFFYVNSSTlVYVZQNkRTNHViQWQ4YWt2Z0VhRDJ6NWhkRHpWTUdLK09SSG41ckljN2ZvYVZ3WllQRCt6aGIvaXFJYWdvVktWUVFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mzk3OTUwCWZpbGU6RW50cm9UZWN0XzAuOC4wLWJldGEuMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC44LjAtYmV0YS4xCmlURWFpZHF2MW9Qb05kOXorY2kyNjZtaGZzNG85QTBObmZ6clgvQTNEbEE1ME5RWXozVTFoOWJNWDN5Snlka2M3YU02RXdaSGl5RGszS1NFdU8vTUNRPT0K",
-      "url": "https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/download/v0.8.0-beta.1/EntroTect_0.8.0-beta.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWWIrU1pGci9CMnVqWUtiRFI3UVEyc251SzVGSVBtbmlWUFZKd0xGSlRlSEFNUmQxN1VoY2hjNGNMN3g5eEErT1ZPNlJuaFlsdisxWXFTTitFdTZ5NWtkSDlVcTVKMHdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDE3NTYxCWZpbGU6RW50cm9UZWN0XzAuOC4wLWJldGEuMl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC44LjAtYmV0YS4yCmVMYlhLRnhPcDEybTJ2dGdxYTJxc2FlRjhyMi96SzMxSnh0clFoUzFqL25HM1dBdTVvRkNCZXlQQ3RCa0YrRmx2dloydzMzOGx3UkI3YUZpQ2lzckR3PT0K",
+      "url": "https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/download/v0.8.0-beta.2/EntroTect_0.8.0-beta.2_x64-setup.exe"
     }
   }
 }
