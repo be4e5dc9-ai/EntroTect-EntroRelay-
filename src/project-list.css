@@ -1,0 +1,20 @@
+.sidebar .project-search { margin-bottom: 9px; }
+.project-list-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 3px 9px; color: var(--quiet); font-size: 12px; }
+.project-list-heading strong { font-weight: 600; }
+.project-list-heading span { margin-left: 3px; font-weight: 400; }
+.project-list { scrollbar-gutter: stable; }
+.project-group { margin: 0 0 6px; }
+.project-group-header { display: flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 3px; border-radius: 7px; color: var(--muted); }
+.project-group-header:hover { background: var(--hover); }
+.project-group-header[data-active=true] { color: var(--text); }
+.project-group-toggle, .project-group-new { display: grid; place-items: center; width: 22px; height: 24px; flex-shrink: 0; border-radius: 5px; color: var(--quiet); }
+.project-group-toggle:hover:not(:disabled), .project-group-new:hover:not(:disabled) { background: var(--selected); color: var(--text); }
+.project-group-name { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; gap: 7px; text-align: left; font-size: 13px; }
+.project-group-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-group-count { color: var(--quiet); font-size: 10px; }
+.project-conversations { margin-left: 15px; }
+.project-conversations .conversation-row > svg { flex-shrink: 0; color: var(--quiet); }
+.project-conversations .engine-icon { width: 13px; height: 13px; }
+.project-no-conversations { margin: 0; padding: 4px 8px; color: var(--quiet); font-size: 11px; }
+.recent-conversations { padding-top: 10px; margin: 14px 0 7px; border-top: 1px solid var(--line); }
+.recent-conversations h2 { margin: 0 8px 5px; font-size: 12px; font-weight: 600; color: var(--quiet); }

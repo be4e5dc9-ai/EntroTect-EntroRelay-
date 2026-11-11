@@ -1,0 +1,39 @@
+.app-update-reminder {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 9px;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  text-align: left;
+}
+.app-update-reminder:hover { border-color: var(--accent-meter); }
+.app-update-reminder > svg { flex-shrink: 0; }
+.update-reminder-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.update-reminder-copy strong { color: var(--text); font-size: 12px; }
+.update-reminder-copy small { font-size: 11px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.update-reminder-track { height: 3px; margin-top: 2px; border-radius: 3px; background: var(--surface); overflow: hidden; }
+.update-reminder-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent-meter); transition: width var(--motion-popover) var(--motion-ease); }
+.rail-button.update-rail-button { background: var(--accent-wash); color: var(--accent-ink); }
+.rail-button.update-rail-button:hover { background: var(--accent-border); color: var(--text); }
+
+.app-update-log { width: min(580px, calc(100vw - 36px)); max-height: calc(100vh - 84px); padding: 0; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--dialog-shadow); overflow: hidden; }
+.app-update-log[open] { display: flex; }
+.app-update-log::backdrop { background: var(--scrim); }
+.app-update-log > section { display: flex; flex-direction: column; width: 100%; min-height: 0; }
+.app-update-log .dialog-header > div > svg { color: var(--accent-ink); }
+.app-update-log-content { min-height: 0; overflow: auto; padding: 14px 18px 20px; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.app-update-log-content h2, .app-update-log-content h3 { margin: 14px 0 6px; font-size: 14px; }
+.app-update-log-content > :first-child, .app-update-release > :first-child { margin-top: 0; }
+.app-update-log-content p, .app-update-log-content ul { margin: 7px 0 12px; }
+.app-update-log-content ul { padding-left: 20px; }
+.app-update-log-content a { color: var(--accent-ink); }
+.app-update-past { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
+.app-update-past summary { color: var(--muted); cursor: pointer; }
+.app-update-settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .update-reminder-track > span { transition: none; } }

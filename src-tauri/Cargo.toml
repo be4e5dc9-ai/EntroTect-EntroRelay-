@@ -1,0 +1,25 @@
+[package]
+name = "entrotect"
+version = "0.8.0-beta.1"
+license = "Apache-2.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+base64 = "0.22"
+rfd = "0.15"
+webview2-com = "0.39.1"
+windows-core = "0.62.2"
+wry = { version = "0.57.1", default-features = false, features = ["os-webview"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

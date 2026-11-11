@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EntroTect",
+  "version": "0.8.0-beta.1",
+  "identifier": "app.entrotect.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "EntroTect",
+        "width": 1440,
+        "height": 940,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "decorations": false,
+        "backgroundColor": "#f4f4f4"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "../assets/app.ico"
+    ]
+  }
+}

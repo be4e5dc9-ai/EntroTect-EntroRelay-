@@ -1,0 +1,98 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.7.0'
+      - name: Verify release configuration
+        env:
+          UPDATE_PUBLIC_KEY: ${{ vars.ENTROTECT_UPDATER_PUBLIC_KEY }}
+          UPDATE_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF -ne "refs/tags/v$version" -or $version -notmatch '^\d+\.\d+\.\d+(-beta\.\d+)?$') {
+            throw "Run this workflow on the v$version tag."
+          }
+          if (!$env:UPDATE_PUBLIC_KEY -or !$env:UPDATE_PRIVATE_KEY) { throw 'Configure the Tauri update signing keys in GitHub Actions.' }
+          $releases = gh release list --repo $env:GITHUB_REPOSITORY --json tagName,isDraft --limit 100 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing releases' }
+          if ($releases | Where-Object { $_.tagName -eq "v$version" -and !$_.isDraft }) { throw 'This version is already public.' }
+          "ENTROTECT_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+      - run: pnpm runtime:setup
+      - run: pnpm test:workspace
+      - run: pnpm test:store
+      - run: pnpm test:native
+      - run: pnpm test:sync
+      - name: Build signed installer
+        env:
+          ENTROTECT_RELEASE_REPOSITORY: ${{ github.repository }}
+          ENTROTECT_UPDATER_PUBLIC_KEY: ${{ vars.ENTROTECT_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm desktop:installer --release
+      - name: Package and verify portable edition
+        run: |
+          node scripts/package.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/verify-package.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = $env:ENTROTECT_RELEASE_VERSION
+          $installer = "release/windows-installer-$version/EntroTect_${version}_x64-setup.exe"
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $installer -Leaf)" | Add-Content "release/SHA256SUMS-$version.txt" -Encoding utf8NoBOM
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:ENTROTECT_RELEASE_VERSION
+          $tag = "v$version"
+          $folder = "release/windows-installer-$version"
+          $installer = "EntroTect_${version}_x64-setup.exe"
+          $manifest = Get-Content "$folder/latest.json" -Raw | ConvertFrom-Json
+          $notesPath = Join-Path $env:RUNNER_TEMP 'entrotect-notes.md'
+          Set-Content $notesPath $manifest.notes -Encoding utf8NoBOM
+          $extra = @()
+          if ($version.Contains('-beta.')) { $extra = @('--prerelease') }
+          $existing = gh release list --repo $env:GITHUB_REPOSITORY --json tagName,isDraft --limit 100 | ConvertFrom-Json | Where-Object tagName -eq $tag
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!$existing) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title "EntroTect $version" --notes-file $notesPath @extra
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag "$folder/$installer" "$folder/$installer.sig" "$folder/latest.json" "release/EntroTect-$version-tauri-win-x64.zip" "release/SHA256SUMS-$version.txt" --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false @extra
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($version.Contains('-beta.')) {
+            $endpoint = "repos/$env:GITHUB_REPOSITORY/contents/updates/beta.json"
+            $sha = gh api $endpoint --jq .sha 2>$null
+            if ($LASTEXITCODE -ne 0) { throw 'Beta feed must be initialized on main before publishing.' }
+            $body = @{ message = "Update Beta feed to $version"; branch = 'main'; sha = $sha; content = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$folder/latest.json")) }
+            $payload = Join-Path $env:RUNNER_TEMP 'entrotect-feed.json'
+            $body | ConvertTo-Json | Set-Content $payload -Encoding utf8NoBOM
+            gh api $endpoint --method PUT --input $payload --silent
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

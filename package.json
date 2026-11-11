@@ -1,0 +1,47 @@
+{
+  "name": "entrotect",
+  "version": "0.8.0-beta.1",
+  "license": "Apache-2.0",
+  "description": "Windows agent workspace with native DeepSeek Harness, ZCode, Kimi Code, OpenCode, and Codex execution",
+  "author": "EntroTect",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && tsc -p tsconfig.backend.json && vite build && node scripts/build.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop": "pnpm build && tauri dev",
+    "desktop:build": "tauri build --no-bundle && node scripts/package.mjs",
+    "desktop:installer": "pnpm build && node scripts/package-updater.mjs",
+    "test": "node scripts/test-native.mjs",
+    "test:native": "node scripts/test-native.mjs",
+    "test:e2e": "playwright test",
+    "runtime:setup": "node scripts/setup-runtime.mjs",
+    "test:workspace": "node scripts/test-workspace.mjs",
+    "test:history": "node scripts/test-history.mjs",
+    "test:updates": "esbuild tests/runtime-updates.ts --bundle --platform=node --format=esm --outfile=.local/runtime-updates-test.mjs && node --test .local/runtime-updates-test.mjs",
+    "test:agents": "esbuild tests/agent-native.ts --bundle --platform=node --format=esm --outfile=.local/agent-native-test.mjs && node --test .local/agent-native-test.mjs",
+    "test:store": "node scripts/test-store.mjs",
+    "test:sync": "node scripts/test-sync.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "lucide-react": "^0.577.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "7zip-bin": "^5.2.0",
+    "@playwright/test": "^1.56.0",
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "latest",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.0",
+    "vite": "latest"
+  }
+}

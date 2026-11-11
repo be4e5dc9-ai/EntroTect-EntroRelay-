@@ -1,0 +1,14 @@
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { access, copyFile } from 'node:fs/promises';
+import path from 'node:path';
+import { cargoTarget } from './cargo-target.mjs';
+import {stageRoot,archiveName} from './release-info.mjs';
+import {stagePackage} from './stage-package.mjs';
+const require=createRequire(import.meta.url),root=stageRoot;
+const executable=path.join(cargoTarget,'release','entrotect.exe');await access(executable);
+await stagePackage(root);
+await copyFile(executable,path.join(root,'EntroTect.exe'));
+const zip=path.resolve('release',archiveName);
+await new Promise((resolve,reject)=>{const child=spawn(require('7zip-bin').path7za,['a','-tzip','-mx=3',zip,'.'],{cwd:root,windowsHide:true,stdio:'inherit'});child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(new Error(`ZIP exited ${code}`)));});
+console.log(`Tauri package ready: ${zip}`);

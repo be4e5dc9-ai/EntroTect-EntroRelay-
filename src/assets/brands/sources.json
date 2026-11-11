@@ -1,0 +1,45 @@
+[
+  {
+    "file": "deepseek.ico",
+    "source": "https://www.deepseek.com/favicon.ico",
+    "sha256": "30a4420e6e4dcb17fd7de560c5004346c2bc8cd971d2d5f5ee15326603e51321",
+    "bytes": 209762
+  },
+  {
+    "file": "deepseek-harness.svg",
+    "source": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/apps/desktop/resources/icon.svg",
+    "sha256": "0458ed5e4825846a6560e90d3e4de767cd75842f7eb53539dc87a5db380d9146",
+    "bytes": 7281
+  },
+  {
+    "file": "zai.svg",
+    "source": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    "sha256": "07a45e8e35b0b631ed2c68cd1cb041f9721b1ceeb0bd0e34f1459b0304a741c7",
+    "bytes": 11037
+  },
+  {
+    "file": "zcode.png",
+    "source": "https://raw.githubusercontent.com/zai-org/ZCode/a9fe401eede6e6e5e01be9048679c206fe6f02d9/public/logo/icons/128x128.png",
+    "sha256": "1ec553f7eaeae4492c673e9d636692a3898d11800d912628d8c1e667222d6d19",
+    "bytes": 8784
+  },
+  {
+    "file": "kimi.png",
+    "source": "https://raw.githubusercontent.com/MoonshotAI/kimi-code/eb2035f3cad57cc12d4d5082ec626f7f0ea5f651/apps/vscode/webview-ui/public/kimi-logo.png",
+    "sha256": "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6",
+    "bytes": 11486
+  },
+  {
+    "file": "opencode.svg",
+    "source": "https://raw.githubusercontent.com/anomalyco/opencode/810c0eba1a7348036f8bdf61e6632d0c36c6876c/packages/ui/src/assets/favicon/favicon-v3.svg",
+    "sha256": "e29bbe33380ad1c1ada9134b52f229d30e9776d60481512c9d81f2bb6f37def9",
+    "bytes": 612
+  },
+  {
+    "file": "codex.png",
+    "source": "https://openai.com/codex/",
+    "artifact": "Windows package OpenAI.Codex 26.1103.4239.0, Assets/Square44x44Logo.png",
+    "sha256": "1c24f9748501bd04831bfbe1dd5383096167af211447752463a7bbaf604b326f",
+    "bytes": 2877
+  }
+]
