@@ -21,7 +21,7 @@ const sevenZip=createRequire(import.meta.url)('7zip-bin').path7za;
 const oldRuntime=execFileSync(sevenZip,['l','-ba',archive,'runtimes/bridge/*'],{encoding:'utf8',windowsHide:true});
 if(oldRuntime.trim())throw new Error('The ZIP contains an obsolete context converter');
 const codexRuntime='runtimes/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc';
-for(const file of ['EntroTect.exe','backend/worker.cjs','README.md','CHANGELOG.md','docs/reasoning-capabilities.md','runtimes/versions.json',
+for(const file of ['EntroTect.exe','backend/worker.cjs','README.md','README.en.md','CHANGELOG.md','CHANGELOG.en.md','docs/reasoning-capabilities.md','runtimes/versions.json',
  'runtimes/kimi/node_modules/@moonshot-ai/kimi-code/dist/main.mjs','runtimes/kimi/node_modules/@moonshot-ai/kimi-code/LICENSE',
  'runtimes/opencode/node_modules/opencode-windows-x64/bin/opencode.exe','runtimes/opencode/LICENSE',
  `${codexRuntime}/bin/codex.exe`,`${codexRuntime}/bin/codex-code-mode-host.exe`,`${codexRuntime}/codex-path/rg.exe`,

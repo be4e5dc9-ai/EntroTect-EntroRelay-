@@ -1,3 +1,4 @@
+import { useI18n } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import type { DesktopApi } from '../shared/types';
@@ -21,6 +22,7 @@ export function CommandInput({ value, onChange, onSend, scope, cacheScope, disab
   cacheScope: string;
   disabled: boolean;
 }) {
+  const { t } = useI18n();
   const { harness, workspace, modelId, id } = scope;
   const prefix = slashPrefix(value);
   const [focused, setFocused] = useState(false);
@@ -72,25 +74,25 @@ export function CommandInput({ value, onChange, onSend, scope, cacheScope, disab
     {open && <div ref={menu} className="slash-menu" onBlur={event => {
       if (event.relatedTarget !== input.current && !event.currentTarget.contains(event.relatedTarget)) setFocused(false);
     }}>
-      <header><HarnessIcon h={harness}/><strong>{harnessNames[harness]}</strong><span>斜杠命令</span>
-        <button type="button" className="icon-button" aria-label="刷新斜杠命令" title="刷新斜杠命令" disabled={catalog?.loading}
+      <header><HarnessIcon h={harness}/><strong>{harnessNames[harness]}</strong><span>{t("斜杠命令")}</span>
+        <button type="button" className="icon-button" aria-label={t("刷新斜杠命令")} title={t("刷新斜杠命令")} disabled={catalog?.loading}
           onMouseDown={event => event.preventDefault()} onClick={() => { input.current?.focus(); readCatalog(); }}>
           <RefreshCw size={14} className={catalog?.loading ? 'spin' : undefined}/>
         </button>
       </header>
       {catalog?.commands && catalog.error && <p role="status">{catalog.error}</p>}
-      {!loaded ? <p role="status"><LoaderCircle className="spin" size={14}/>正在读取命令…</p>
+      {!loaded ? <p role="status"><LoaderCircle className="spin" size={14}/>{t("正在读取命令…")}</p>
         : !catalog?.commands ? <p role="status">{catalog?.error}</p>
-        : matches.length ? <div id="slash-options" role="listbox" aria-label="斜杠命令">
+        : matches.length ? <div id="slash-options" role="listbox" aria-label={t("斜杠命令")}>
           {matches.map((command, index) => <div id={`slash-option-${command.name}`} role="option" aria-selected={command === current}
             key={command.name} onMouseMove={() => setActive(index)} onMouseDown={e => e.preventDefault()} onClick={() => choose(command)}>
             <span><strong>/{command.name}</strong>{command.inputHint && <code>{command.inputHint}</code>}</span>
-            {command.description && <small>{command.description}</small>}
+            {command.description && <small>{t(command.description)}</small>}
           </div>)}
-        </div> : <p role="status">没有匹配的命令</p>}
+        </div> : <p role="status">{t("没有匹配的命令")}</p>}
     </div>}
-    <textarea ref={input} aria-label="任务输入" rows={1} placeholder="和 EntroTect 一起工作"
-      title="Enter 发送 · Shift + Enter 换行 · 输入 / 查看命令"
+    <textarea ref={input} aria-label={t("任务输入")} rows={1} placeholder={t("和 EntroTect 一起工作")}
+      title={t("Enter 发送 · Shift + Enter 换行 · 输入 / 查看命令")}
       aria-controls={open && matches.length ? 'slash-options' : undefined}
       aria-activedescendant={open && current ? `slash-option-${current.name}` : undefined}
       value={value} onFocus={() => { setFocused(true); setDismissed(false); }} onBlur={event => {

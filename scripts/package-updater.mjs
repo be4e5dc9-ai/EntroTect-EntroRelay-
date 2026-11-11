@@ -65,9 +65,13 @@ try {
   await copyFile(bundle, path.join(output, name));
   if (signed) {
     const signature = (await readFile(`${bundle}.sig`, 'utf8')).trim();
-    const changelog = (await readFile('CHANGELOG.md', 'utf8')).replaceAll('\r\n', '\n');
-    const section = changelog.split(/^## /m).find(entry => entry.startsWith(`${version}\n`));
-    const notes = section?.slice(version.length).trim();
+    async function releaseNotes(file) {
+      const changelog = (await readFile(file, 'utf8')).replaceAll('\r\n', '\n');
+      const section = changelog.split(/^## /m).find(entry => entry.startsWith(`${version}\n`));
+      return section?.slice(version.length).trim();
+    }
+    const [chinese, english] = await Promise.all([releaseNotes('CHANGELOG.md'), releaseNotes('CHANGELOG.en.md')]);
+    const notes = chinese && english ? `${chinese}\n\n<!-- entrotect:en -->\n\n${english}` : chinese ?? english;
     await copyFile(`${bundle}.sig`, path.join(output, `${name}.sig`));
     await writeFile(path.join(output, 'latest.json'), JSON.stringify({
       version, ...(notes ? { notes } : {}), pub_date: new Date().toISOString(),

@@ -17,7 +17,9 @@ export async function stagePackage(root) {
     delete versions.bridge;
     await writeFile(manifest, JSON.stringify(versions, null, 2));
   }
-  for (const file of ['README.md', 'CHANGELOG.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md']) await copyFile(file, path.join(root, file));
+  for (const file of ['README.md', 'README.en.md', 'CHANGELOG.md', 'CHANGELOG.en.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md']) {
+    await copyFile(file, path.join(root, file));
+  }
   await cp('docs', path.join(root, 'docs'), { recursive: true, force: true });
   await collectNotices(path.join(root, 'licenses'));
   await mkdir(path.join(root, 'licenses', 'brands'), { recursive: true });

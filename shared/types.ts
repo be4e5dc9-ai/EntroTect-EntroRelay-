@@ -1,4 +1,5 @@
 import type { HarnessCommand } from './commands';
+import type { LanguagePreference } from './language';
 import type { AccentColor } from './appearance';
 import type { FileReference } from './preview-link';
 
@@ -28,7 +29,7 @@ export type HarnessUpdates = Record<Harness, HarnessUpdateStatus>;
 export interface RuntimeSelection { harness: Harness; conversationId?: string; }
 export type Theme = 'light' | 'dark' | 'system';
 export type QuotaRegion = 'auto' | 'zai' | 'bigmodel';
-export interface Settings { deepseek: LaunchConfig; zcode: LaunchConfig; agents?: Partial<Record<AgentHarness, LaunchConfig>>; defaultWorkspace: string; history?: HistoryPreferences; startup?: HarnessStartup; harnessUpdates?: HarnessUpdatePreferences; autoAppUpdate?: boolean; theme?: Theme; accentColor?: AccentColor; quotaRegion?: QuotaRegion; }
+export interface Settings { deepseek: LaunchConfig; zcode: LaunchConfig; agents?: Partial<Record<AgentHarness, LaunchConfig>>; defaultWorkspace: string; history?: HistoryPreferences; startup?: HarnessStartup; harnessUpdates?: HarnessUpdatePreferences; autoAppUpdate?: boolean; language?: LanguagePreference; theme?: Theme; accentColor?: AccentColor; quotaRegion?: QuotaRegion; }
 export interface AppUpdateStatus {
   version: string; state: 'portable' | 'unconfigured' | 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'installing' | 'error';
   available?: string; notes?: string; downloaded?: number; total?: number; detail?: string;

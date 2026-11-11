@@ -1,9 +1,11 @@
+import { useI18n } from './i18n';
 import { memo, useEffect, useRef } from 'react';
 import { ArrowDownToLine, ChevronRight, CircleAlert, FileText, PackageCheck, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AppUpdateStatus } from '../shared/types';
 import changelog from '../CHANGELOG.md?raw';
+import changelogEnglish from '../CHANGELOG.en.md?raw';
 import { api } from './api';
 import './app-update.css';
 
@@ -15,14 +17,15 @@ const titles = {
 } as const;
 
 export function AppUpdateReminder({ update, compact, onOpen }: { update?: AppUpdateStatus; compact?: boolean; onOpen(): void }) {
+  const { t } = useI18n();
   if (!update?.available || !(update.state in titles)) return null;
-  const title = titles[update.state as keyof typeof titles];
+  const title = t(titles[update.state as keyof typeof titles]);
   const progress = update.state === 'downloading' && update.total && update.total > 0
     ? Math.min(100, Math.max(0, Math.round((update.downloaded ?? 0) / update.total * 100))) : undefined;
   const detail = `v${update.available}${progress !== undefined ? ` · ${progress}%` : ''}`;
   const Icon = update.state === 'ready' ? PackageCheck : update.state === 'error' ? CircleAlert : ArrowDownToLine;
   return <button type="button" className={compact ? 'rail-button update-rail-button' : 'app-update-reminder'}
-    aria-label={`${title}，${detail}，查看更新日志`} title={`${title} · ${detail}`} onClick={onOpen}>
+    aria-label={t("{0}，{1}，查看更新日志", title, detail)} title={`${title} · ${detail}`} onClick={onOpen}>
     <Icon size={compact ? 18 : 16} aria-hidden="true"/>
     {!compact && <>
       <span className="update-reminder-copy"><strong>{title}</strong><small>{detail}</small>
@@ -45,6 +48,10 @@ const ReleaseMarkdown = memo(function ReleaseMarkdown({ text }: { text: string }
 });
 
 export function AppUpdateLog({ update, onClose }: { update?: AppUpdateStatus; onClose(): void }) {
+  const { t, locale } = useI18n();
+  const history = locale === 'en' ? changelogEnglish : changelog;
+  const [original, english] = update?.notes?.split('\n<!-- entrotect:en -->\n', 2) ?? [];
+  const notes = (locale === 'en' ? english || original : original)?.trim();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current!;
@@ -58,20 +65,20 @@ export function AppUpdateLog({ update, onClose }: { update?: AppUpdateStatus; on
     onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <section>
       <header className="dialog-header">
-        <div><FileText size={18}/><h2 id="app-update-log-title">更新日志</h2></div>
-        <button className="icon-button" aria-label="关闭更新日志" onClick={onClose}><X size={17}/></button>
+        <div><FileText size={18}/><h2 id="app-update-log-title">{t("更新日志")}</h2></div>
+        <button className="icon-button" aria-label={t("关闭更新日志")} onClick={onClose}><X size={17}/></button>
       </header>
       <div className="app-update-log-content">
-        {available && <section className="app-update-release" aria-label={`新版 ${available}`}>
-          <h3>新版 v{available}</h3>
-          {update.notes?.trim() ? <ReleaseMarkdown text={update.notes}/> : <p>此版本暂无发布说明。</p>}
+        {available && <section className="app-update-release" aria-label={t("新版 {0}", available)}>
+          <h3>{t("新版 v")}{available}</h3>
+          {notes ? <ReleaseMarkdown text={notes}/> : <p>{t("此版本暂无发布说明。")}</p>}
         </section>}
-        {available ? <details className="app-update-past"><summary>本地版本记录</summary><ReleaseMarkdown text={changelog}/></details>
-          : <ReleaseMarkdown text={changelog}/>}
+        {available ? <details className="app-update-past"><summary>{t("本地版本记录")}</summary><ReleaseMarkdown text={history}/></details>
+          : <ReleaseMarkdown text={history}/>}
       </div>
       <footer className="dialog-footer">
-        {update?.version && <span>当前版本 v{update.version}</span>}
-        <button className="secondary-button" onClick={onClose}>完成</button>
+        {update?.version && <span>{t("当前版本 v")}{update.version}</span>}
+        <button className="secondary-button" onClick={onClose}>{t("完成")}</button>
       </footer>
     </section>
   </dialog>;

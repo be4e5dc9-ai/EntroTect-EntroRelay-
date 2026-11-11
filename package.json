@@ -1,6 +1,6 @@
 {
   "name": "entrotect",
-  "version": "0.8.0-beta.1",
+  "version": "0.8.0-beta.2",
   "license": "Apache-2.0",
   "description": "Windows agent workspace with native DeepSeek Harness, ZCode, Kimi Code, OpenCode, and Codex execution",
   "author": "EntroTect",

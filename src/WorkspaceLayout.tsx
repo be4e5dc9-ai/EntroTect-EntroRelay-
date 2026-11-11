@@ -1,3 +1,4 @@
+import { useI18n } from './i18n';
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 
 type Side = 'left' | 'right';
@@ -37,6 +38,7 @@ export function WorkspaceLayout({ leftOpen, rightOpen, hidden, inactive, left, r
   leftOpen: boolean; rightOpen: boolean; hidden: boolean; inactive: boolean;
   left: ReactNode; right: ReactNode; children: ReactNode;
 }) {
+  const { t } = useI18n();
   const layout = useRef<HTMLDivElement>(null);
   const guide = useRef<HTMLDivElement>(null);
   const leftHandle = useRef<HTMLDivElement>(null);
@@ -177,7 +179,7 @@ export function WorkspaceLayout({ leftOpen, rightOpen, hidden, inactive, left, r
   function handle(side: Side) {
     return <div ref={side === 'left' ? leftHandle : rightHandle} className={`pane-handle pane-handle-${side}`}
       role="separator" tabIndex={0} aria-orientation="vertical" aria-label={labels[side]}
-      aria-controls={`workspace-${side}`} aria-valuemin={minimum[side]} title={`${labels[side]} · 双击恢复默认`}
+      aria-controls={`workspace-${side}`} aria-valuemin={minimum[side]} title={t("{0} · 双击恢复默认", labels[side])}
       onPointerDown={event => start(side, event)}
       onKeyDown={event => resizeWithKey(side, event)}
       onDoubleClick={() => {

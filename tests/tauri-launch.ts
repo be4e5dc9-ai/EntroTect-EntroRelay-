@@ -13,6 +13,7 @@ export async function launchTauri(env:NodeJS.ProcessEnv){
   const file=path.join(env.ENTROTECT_DATA_DIR,'settings.json');const saved=JSON.parse(await readFile(file,'utf8').catch(e=>{if(e.code!=='ENOENT')throw e;return '{}';}));
   const native=path.join(env.ENTROTECT_DATA_DIR,'native-test-home');
   await atomicJson(file,{...saved,
+   ...(env.ENTROTECT_TEST_SYSTEM_LANGUAGE==='1'?{}:{language:saved.language??'zh-CN'}),
    deepseek:{home:path.join(native,'deepseek'),...saved.deepseek},zcode:{home:path.join(native,'zcode'),...saved.zcode},
    agents:Object.fromEntries(agentHarnesses.map(harness=>[harness,{home:path.join(native,harness),...saved.agents?.[harness]}])),
    ...(env.ENTROTECT_TEST_SYNC==='1'?{}:{history:{...saved.history,autoImport:false,autoExport:false}}),
@@ -27,5 +28,5 @@ export async function launchTauri(env:NodeJS.ProcessEnv){
  if(!ready){child.kill();throw new Error(`WebView2 debugging did not start: ${errors}`);}
  const browser=await chromium.connectOverCDP(origin);const context=browser.contexts()[0];let page=context.pages()[0];if(!page)page=await context.waitForEvent('page');
  await page.waitForFunction(()=>!!window.entrotect);
- return {pid:child.pid!,firstWindow:async()=>page,close:async()=>{try{await page.getByTitle('关闭窗口',{exact:true}).click({timeout:5000});}catch{}await Promise.race([exited,new Promise(r=>setTimeout(r,15000))]);if(child.exitCode===null)child.kill();await browser.close().catch(()=>{});}};
+ return {pid:child.pid!,firstWindow:async()=>page,close:async()=>{try{await page.getByTitle(/^(关闭窗口|Close window)$/).click({timeout:5000});}catch{}await Promise.race([exited,new Promise(r=>setTimeout(r,15000))]);if(child.exitCode===null)child.kill();await browser.close().catch(()=>{});}};
 }

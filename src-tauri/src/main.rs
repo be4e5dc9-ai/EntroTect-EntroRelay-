@@ -14,7 +14,10 @@ use app_update::AppUpdater;
  fn CryptProtectData(input:*const Blob, description:*const u16, entropy:*const Blob,reserved:*mut std::ffi::c_void,prompt:*mut std::ffi::c_void,flags:u32,output:*mut Blob)->i32;
  fn CryptUnprotectData(input:*const Blob, description:*mut *mut u16,entropy:*const Blob,reserved:*mut std::ffi::c_void,prompt:*mut std::ffi::c_void,flags:u32,output:*mut Blob)->i32;
 }
-#[link(name="Kernel32")] extern "system" { fn LocalFree(memory:*mut std::ffi::c_void)->*mut std::ffi::c_void; }
+#[link(name="Kernel32")] extern "system" {
+ fn LocalFree(memory:*mut std::ffi::c_void)->*mut std::ffi::c_void;
+ fn GetUserDefaultUILanguage()->u16;
+}
 fn crypt(method:&str,value:&str)->Result<String,String>{
  let mut bytes=if method=="protect"{value.as_bytes().to_vec()}else{STANDARD.decode(value).map_err(|e|e.to_string())?};
  let input=Blob{len:bytes.len() as u32,data:bytes.as_mut_ptr()};let mut out=Blob{len:0,data:std::ptr::null_mut()};
@@ -98,9 +101,11 @@ async fn install_app_update(app:&tauri::AppHandle,state:&Backend)->Result<Value,
  }
 }
 #[tauri::command]
-async fn desktop_call(app:tauri::AppHandle,state:tauri::State<'_,Backend>,method:String,params:Option<Value>)->Result<Value,String>{
+async fn desktop_call(app:tauri::AppHandle,state:tauri::State<'_,Backend>,method:String,params:Option<Value>,locale:Option<String>)->Result<Value,String>{
  let p=params.unwrap_or_else(||json!({}));
+ let english=locale.as_deref()==Some("en");
  match method.as_str(){
+  "language:system"=>{let chinese=(unsafe { GetUserDefaultUILanguage() } & 0x03ff)==0x04;Ok(json!(if chinese{"zh-CN"}else{"en"}))},
   "window:close"=>{request_shutdown(&app);Ok(Value::Null)},
   "app:updateStatus"=>Ok(app.state::<AppUpdater>().status()),
   _ if state.closing.load(Ordering::Acquire)=>Err("应用正在退出".into()),
@@ -111,7 +116,7 @@ async fn desktop_call(app:tauri::AppHandle,state:tauri::State<'_,Backend>,method
    app.state::<AppUpdater>().set_automatic(&app,saved["autoAppUpdate"].as_bool()!=Some(false));
    Ok(saved)
   },
-  "dialog:directory"|"dialog:executable"|"dialog:database"=>{let directory=method=="dialog:directory";let database=method=="dialog:database";let file=tauri::async_runtime::spawn_blocking(move||if directory{rfd::FileDialog::new().pick_folder()}else if database{rfd::FileDialog::new().add_filter("ZCode 数据库",&["sqlite","sqlite3","db"]).pick_file()}else{rfd::FileDialog::new().add_filter("程序",&["exe","js","mjs","cjs"]).pick_file()}).await.map_err(|e|e.to_string())?;Ok(file.map(|v|json!(v)).unwrap_or(Value::Null))},
+  "dialog:directory"|"dialog:executable"|"dialog:database"=>{let directory=method=="dialog:directory";let database=method=="dialog:database";let file=tauri::async_runtime::spawn_blocking(move||if directory{rfd::FileDialog::new().pick_folder()}else if database{rfd::FileDialog::new().add_filter(if english{"ZCode database"}else{"ZCode 数据库"},&["sqlite","sqlite3","db"]).pick_file()}else{rfd::FileDialog::new().add_filter(if english{"Executable"}else{"程序"},&["exe","js","mjs","cjs"]).pick_file()}).await.map_err(|e|e.to_string())?;Ok(file.map(|v|json!(v)).unwrap_or(Value::Null))},
   "path:open"=>{let path=PathBuf::from(p["path"].as_str().ok_or("无效路径")?);if !path.is_absolute(){return Err("只能打开本地绝对路径".into());}Command::new("explorer.exe").arg(path).creation_flags(0x08000000).spawn().map_err(|e|e.to_string())?;Ok(Value::Null)},
   "browser:preview"=>browser_preview::dispatch(app,state.root.join("web-preview"),p).await,
   "link:open"=>{
@@ -139,7 +144,7 @@ async fn desktop_call(app:tauri::AppHandle,state:tauri::State<'_,Backend>,method
    child.creation_flags(0x00000010).spawn().map_err(|error| error.to_string())?;
    Ok(Value::Null)
   },
-  "context:export"=>{let source=state.call("context:path",p).await?;let source=source.as_str().ok_or("本轮结束后才会生成上下文")?.to_owned();let dest=tauri::async_runtime::spawn_blocking(||rfd::FileDialog::new().set_file_name("context.entrotect.json").add_filter("统一上下文",&["json"]).save_file()).await.map_err(|e|e.to_string())?;if let Some(dest)=dest{std::fs::copy(source,&dest).map_err(|e|e.to_string())?;Ok(json!(dest))}else{Ok(Value::Null)}},
+  "context:export"=>{let source=state.call("context:path",p).await?;let source=source.as_str().ok_or("本轮结束后才会生成上下文")?.to_owned();let dest=tauri::async_runtime::spawn_blocking(move||rfd::FileDialog::new().set_file_name("context.entrotect.json").add_filter(if english{"Unified context"}else{"统一上下文"},&["json"]).save_file()).await.map_err(|e|e.to_string())?;if let Some(dest)=dest{std::fs::copy(source,&dest).map_err(|e|e.to_string())?;Ok(json!(dest))}else{Ok(Value::Null)}},
   _=>state.call(&method,p).await
  }
 }

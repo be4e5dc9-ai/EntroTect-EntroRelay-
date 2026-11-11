@@ -2,7 +2,7 @@ import type { DesktopApi } from '../shared/types';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 declare global { interface Window { entrotect?: DesktopApi } }
-const call=<T,>(method:string,params:Record<string,unknown>={})=>invoke<T>('desktop_call',{method,params});
+const call=<T,>(method:string,params:Record<string,unknown>={})=>invoke<T>('desktop_call',{method,params,locale:document.documentElement.lang});
 const tauriApi:DesktopApi={
   appUpdateStatus:()=>call('app:updateStatus'),checkAppUpdate:()=>call('app:checkUpdate'),installAppUpdate:()=>call('app:installUpdate'),
   launchAgentLogin:harness=>call('agent:login',{harness}),
@@ -33,6 +33,7 @@ const tauriApi:DesktopApi={
 };
 export const api = isTauri() ? tauriApi : window.entrotect;
 if(api)window.entrotect=api;
+export const systemLanguage = () => isTauri() ? call<string>('language:system') : Promise.resolve(undefined);
 export const closeWindow=()=>call('window:close');
 export type BrowserBounds = { x: number; y: number; width: number; height: number };
 export type BrowserStatus = { id: string; url: string; loading: boolean; back: boolean; forward: boolean; error?: string };

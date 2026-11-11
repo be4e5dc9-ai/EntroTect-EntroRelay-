@@ -1,3 +1,4 @@
+import { useI18n } from './i18n';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw } from 'lucide-react';
 import { webAddress } from '../shared/preview-link';
@@ -6,6 +7,7 @@ import { api, message, previewBrowser, type BrowserStatus } from './api';
 export function WebPreview({ active, hidden, request }: {
   active: boolean; hidden: boolean; request?: { url: string };
 }) {
+  const { t } = useI18n();
   const id = useId();
   const surface = useRef<HTMLDivElement>(null);
   const editingAddress = useRef(false);
@@ -39,8 +41,8 @@ export function WebPreview({ active, hidden, request }: {
 
   const navigate = useCallback(async (input: string) => {
     const url = webAddress(input, true);
-    if (!url) { setError('请输入有效的 HTTP 或 HTTPS 网址'); return; }
-    if (!previewBrowser) { setError('网页预览需要在桌面版中使用'); return; }
+    if (!url) { setError(t("请输入有效的 HTTP 或 HTTPS 网址")); return; }
+    if (!previewBrowser) { setError(t("网页预览需要在桌面版中使用")); return; }
     const ticket = ++navigation.current;
     setError('');
     editingAddress.current = false;
@@ -117,15 +119,15 @@ export function WebPreview({ active, hidden, request }: {
     void previewBrowser?.send(id, { action }).catch(error => setError(message(error)));
   }
   const problem = error || status?.error;
-  return <div className="web-preview" hidden={hidden} role="tabpanel" aria-label="网页预览">
-    <div className="web-preview-toolbar" role="toolbar" aria-label="网页导航">
-      <button className="icon-button" title="后退" aria-label="后退" disabled={!status?.back} onClick={() => run('back')}><ArrowLeft size={15}/></button>
-      <button className="icon-button" title="前进" aria-label="前进" disabled={!status?.forward} onClick={() => run('forward')}><ArrowRight size={15}/></button>
-      <button className="icon-button" title="重新加载网页" aria-label="重新加载网页" disabled={!created} onClick={() => run('reload')}>
+  return <div className="web-preview" hidden={hidden} role="tabpanel" aria-label={t("网页预览")}>
+    <div className="web-preview-toolbar" role="toolbar" aria-label={t("网页导航")}>
+      <button className="icon-button" title={t("后退")} aria-label={t("后退")} disabled={!status?.back} onClick={() => run('back')}><ArrowLeft size={15}/></button>
+      <button className="icon-button" title={t("前进")} aria-label={t("前进")} disabled={!status?.forward} onClick={() => run('forward')}><ArrowRight size={15}/></button>
+      <button className="icon-button" title={t("重新加载网页")} aria-label={t("重新加载网页")} disabled={!created} onClick={() => run('reload')}>
         <RefreshCw size={14} className={status?.loading ? 'spin' : undefined}/>
       </button>
       <form onSubmit={event => { event.preventDefault(); void navigate(address); }}>
-        <input aria-label="网址" type="text" inputMode="url" autoComplete="off" spellCheck={false} placeholder="输入网址"
+        <input aria-label={t("网址")} type="text" inputMode="url" autoComplete="off" spellCheck={false} placeholder={t("输入网址")}
           value={address} onChange={event => { editingAddress.current = true; setAddress(event.target.value); }}
           onKeyDown={event => {
             if (event.key !== 'Escape') return;
@@ -133,14 +135,14 @@ export function WebPreview({ active, hidden, request }: {
             setAddress(status?.url || '');
           }}/>
       </form>
-      <button className="icon-button" title="在浏览器中打开" aria-label="在浏览器中打开" disabled={!status?.url}
+      <button className="icon-button" title={t("在浏览器中打开")} aria-label={t("在浏览器中打开")} disabled={!status?.url}
         onClick={() => { if (status?.url) void api?.openLink(status.url).catch(error => setError(message(error))); }}>
         <ExternalLink size={14}/>
       </button>
     </div>
-    {problem && <div className="project-error" role="alert">{problem}</div>}
+    {problem && <div className="project-error" role="alert">{t(problem)}</div>}
     <div ref={surface} className="web-preview-surface" aria-busy={status?.loading || undefined}>
-      {!created && <div className="project-empty"><Globe size={24}/><p>打开网页</p><span>输入网址，或点击对话里的链接</span></div>}
+      {!created && <div className="project-empty"><Globe size={24}/><p>{t("打开网页")}</p><span>{t("输入网址，或点击对话里的链接")}</span></div>}
     </div>
   </div>;
 }

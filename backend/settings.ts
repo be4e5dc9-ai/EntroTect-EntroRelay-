@@ -5,6 +5,7 @@ import { agentHarnesses, bundledHarnesses, harnesses, type AgentHarness, type Bu
 import { connectionFor, isAgentHarness } from '../shared/harnesses';
 import { atomicJson } from './store';
 import { zcodeReasoningRules } from '../shared/reasoning';
+import { isLanguagePreference } from '../shared/language';
 import { defaultAccent, isAccentColor } from '../shared/appearance';
 
 const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
@@ -103,6 +104,7 @@ export class SettingsStore {
       zcode: { executable: this.node, args: this.bundledArgs('zcode'), home: os.homedir(), provider: '', model: '', reasoning: 'high', authMode: 'native', baseUrl: 'https://api.z.ai/api/coding/paas/v4' },
       defaultWorkspace: os.homedir(),
       history: { autoImport: true, autoExport: true },
+      language: 'system',
       theme: 'light',
       accentColor: defaultAccent,
       quotaRegion: 'auto',
@@ -119,6 +121,7 @@ export class SettingsStore {
     this.value.startup = startupPreferences(this.value.startup);
     this.value.harnessUpdates = updatePreferences(this.value.harnessUpdates);
     if (!['light', 'dark', 'system'].includes(this.value.theme ?? '')) this.value.theme = 'light';
+    if (!isLanguagePreference(this.value.language)) this.value.language = 'system';
     if (!isAccentColor(this.value.accentColor)) this.value.accentColor = defaultAccent;
     if (!['auto', 'zai', 'bigmodel'].includes(this.value.quotaRegion ?? '')) this.value.quotaRegion = 'auto';
     try { this.keys = JSON.parse(await readFile(path.join(this.root, 'credentials.v2.json'), 'utf8')); }
@@ -136,6 +139,7 @@ export class SettingsStore {
       if (!config.executable.trim() || !path.isAbsolute(config.home) || !Array.isArray(config.args) || config.args.some(a => typeof a !== 'string')) throw new Error('执行路径、参数数组或原生数据目录无效');
     }
     if (!path.isAbsolute(value.defaultWorkspace)) throw new Error('默认工作目录无效');
+    if (value.language !== undefined && !isLanguagePreference(value.language)) throw new Error('界面语言选项无效');
     if (value.theme && !['light', 'dark', 'system'].includes(value.theme)) throw new Error('主题选项无效');
     if (value.accentColor !== undefined && !isAccentColor(value.accentColor)) throw new Error('强调色选项无效');
     if (value.quotaRegion && !['auto', 'zai', 'bigmodel'].includes(value.quotaRegion)) throw new Error('用量地区选项无效');
@@ -158,6 +162,7 @@ export class SettingsStore {
       startup: startupPreferences(value.startup ?? this.value.startup),
       harnessUpdates: updatePreferences(value.harnessUpdates ?? this.value.harnessUpdates),
       autoAppUpdate: (value.autoAppUpdate ?? this.value.autoAppUpdate) !== false,
+      language: value.language ?? this.value.language ?? 'system',
       theme: value.theme ?? this.value.theme ?? 'light',
       accentColor: value.accentColor ?? this.value.accentColor ?? defaultAccent,
       quotaRegion: value.quotaRegion ?? this.value.quotaRegion ?? 'auto',
@@ -169,7 +174,7 @@ export class SettingsStore {
       if (config.args[0] && samePath(config.args[0], entry)) config.args[0] = `@bundled/${harness}`;
     }
     await atomicJson(path.join(this.root, 'settings.json'), stored);
-    this.value = { ...value, agents, history: stored.history, startup: stored.startup, harnessUpdates: stored.harnessUpdates, autoAppUpdate: stored.autoAppUpdate, theme: stored.theme, quotaRegion: stored.quotaRegion };
+    this.value = { ...value, agents, history: stored.history, startup: stored.startup, harnessUpdates: stored.harnessUpdates, autoAppUpdate: stored.autoAppUpdate, theme: stored.theme, language: stored.language, quotaRegion: stored.quotaRegion };
     return this.view();
   }
   async environment(harness: 'deepseek' | 'zcode', nativeRoot: string, modelId?: string, reasoning?: string) {

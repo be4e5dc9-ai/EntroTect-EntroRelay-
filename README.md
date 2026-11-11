@@ -1,12 +1,14 @@
 # EntroTect · EntroRelay
 
+简体中文 · [English](README.en.md)
+
 **把项目、对话和原生 Agent 执行器放进同一个桌面工作区。**
 
 EntroTect 是基于 Tauri 2 的 Windows 桌面应用。选择模型时，它会自动匹配对应的 Harness，也支持手动选择。EntroRelay 是集成在应用中的上下文转换引擎，负责保存历史、转换有效续聊内容，并连接不同 Harness 的原生会话。
 
-当前版本 **0.8.0 Beta 1**，支持 **Windows x64**，界面语言为中文。
+当前版本 **0.8.0 Beta 2**，支持 **Windows x64**，提供简体中文和英文界面。
 
-[下载 Beta](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/tag/v0.8.0-beta.1) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/issues) · [Apache-2.0](LICENSE)
+[下载 Beta](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/tag/v0.8.0-beta.2) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/issues) · [Apache-2.0](LICENSE)
 
 ![EntroTect 工作区与文件预览，使用演示项目](docs/images/workspace.png)
 
@@ -98,9 +100,7 @@ Beta 安装版使用 Beta 更新清单，正式版本使用稳定版更新源。
 
 0.8.0 Beta 面向 Windows x64。跨 Harness 转换仍在持续完善，供应商服务与原生协议的变化可能影响个别连接。自动回归使用真实 Harness 和本地模型响应服务，覆盖运行、暂停、续聊及同步流程。真实付费账号和线上模型效果需要另行验证。
 
-**英文版预告**：后续计划提供英文界面、语言切换和完整英文使用文档，覆盖设置、同步、运行状态与错误提示。具体发布时间将在 Releases 公布。
-
-**English version planned.** An English interface, language switching, and English documentation are on the roadmap. This beta ships with a Chinese interface. Follow Releases for availability.
+**界面语言**可在「设置与连接 → 通用 → 界面语言」选择。跟随系统时，中文 Windows 使用简体中文，其他系统语言使用 English。保存后立即生效。历史消息和原生 Harness 输出保留原文。
 
 反馈时请提供版本、Windows 版本、Harness、复现步骤和经过脱敏的日志。可从会话菜单查看执行器日志。
 

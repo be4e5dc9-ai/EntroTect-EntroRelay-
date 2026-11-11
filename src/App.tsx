@@ -1,3 +1,4 @@
+import { useI18n } from './i18n';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Activity, ArrowUp, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, Download, FileJson2, FolderOpen, FolderPlus, History, House, LoaderCircle, Ellipsis, PanelLeftOpen, PanelLeftClose, PanelRightOpen, PanelRightClose, RefreshCw, Settings2, ShieldCheck, Square, SquarePen, Terminal, X } from 'lucide-react';
 import { accentColors, defaultAccent, type AccentColor } from '../shared/appearance';
@@ -24,10 +25,17 @@ import { WorkspaceLayout } from './WorkspaceLayout';
 const SettingsDialog=lazy(()=>import('./SettingsDialog').then(module=>({default:module.SettingsDialog})));
 const ProjectSidebar=lazy(()=>import('./ProjectSidebar').then(module=>({default:module.ProjectSidebar})));
 const labels={idle:'就绪',starting:'正在启动',running:'正在工作',waiting:'等待你的回复',stopping:'正在暂停',syncing:'正在保存上下文',error:'需要处理'};
-const messageTime = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' });
+function displayTitle(t: import('./i18n').Translate, chat?: Conversation) {
+ return !chat?.title || (chat.title === '新对话' && !chat.revision && !chat.importedFrom) ? t('新对话') : chat.title;
+}
+const messageTimes = {
+ 'zh-CN': new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+ en: new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }),
+};
 const noProjects: string[] = [];
 function Logo(){return <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M7 5h18v5H12v4h11v5H12v4h13v5H7V5Z" fill="currentColor"/><path d="M21 10h4v13h-4z" fill="currentColor" opacity=".28"/></svg>}
 export function App(){
+ const { t, setLanguage } = useI18n();
  const [boot,setBoot]=useState<Bootstrap|null>(null),[chats,setChats]=useState<Conversation[]>([]),[id,setId]=useState<string|null>(null),[items,setItems]=useState<DisplayItem[]>([]);
  const idRef=useRef<string|null>(null),bottom=useRef<HTMLDivElement>(null),follow=useRef(true);
  const [workspace,setWorkspace]=useState(''),[draft,setDraft]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false);
@@ -138,6 +146,7 @@ export function App(){
  async function refresh(){
   if(!api)return;
   const next=await api.bootstrap();
+  setLanguage(next.settings.language??'system');
   const startup=boot?undefined:next.startupRoute;
   const resumed=startup?.conversationId?await api.loadConversation(startup.conversationId).catch(()=>undefined):undefined;
   if(resumed){
@@ -223,7 +232,7 @@ export function App(){
     await api.selectModel(chat.id,model,override==='auto'?undefined:override);
     if(chosenReasoning)await api.selectReasoning(chat.id,chosenReasoning);
    }
-   if(chat.workspaceMissing)throw new Error('请先为这条历史对话选择项目目录');
+   if(chat.workspaceMissing)throw new Error(t("请先为这条历史对话选择项目目录"));
    setDraft(old=>old===text?'':old);follow.current=true;
    await api.send(chat.id,text);
   }catch(e){
@@ -259,30 +268,30 @@ export function App(){
    <WindowControls onError={setError}/>
   </div>
   <div className="desktop-shell">
-   <nav className="app-rail" aria-label="桌面导航" inert={dialogOpen}>
-    <button className={`rail-button ${settings?'':'selected'}`} title="工作区" aria-current={settings?undefined:'page'} onClick={()=>{closeSettings();setSidebar(true);}}><House size={19}/></button>
-    <button className="rail-button" title="新建或打开项目" disabled={!boot||pending||!!settings} onClick={()=>setProjectOpen(true)}><FolderPlus size={19}/></button>
-    <button className="rail-button" title="导入历史对话" disabled={!boot||pending||!!settings} onClick={()=>setHistoryOpen('import')}><History size={19}/></button>
+   <nav className="app-rail" aria-label={t("桌面导航")} inert={dialogOpen}>
+    <button className={`rail-button ${settings?'':'selected'}`} title={t("工作区")} aria-current={settings?undefined:'page'} onClick={()=>{closeSettings();setSidebar(true);}}><House size={19}/></button>
+    <button className="rail-button" title={t("新建或打开项目")} disabled={!boot||pending||!!settings} onClick={()=>setProjectOpen(true)}><FolderPlus size={19}/></button>
+    <button className="rail-button" title={t("导入历史对话")} disabled={!boot||pending||!!settings} onClick={()=>setHistoryOpen('import')}><History size={19}/></button>
     <div className="rail-spacer"/>
     {(!sidebar||settings)&&<AppUpdateReminder update={appUpdate} compact onOpen={()=>setUpdateLogOpen(true)}/>}
-    <button className={`rail-button ${settings?'selected':''}`} title="设置与连接" aria-current={settings?'page':undefined} disabled={!boot||!!settings} onClick={()=>setSettings('general')}>
-     <Settings2 size={19}/>{!!boot?.historySync.issues.length&&<span className="sync-warning" title={`${boot.historySync.issues.length} 项暂未同步`}/>}
+    <button className={`rail-button ${settings?'selected':''}`} title={t("设置与连接")} aria-current={settings?'page':undefined} disabled={!boot||!!settings} onClick={()=>setSettings('general')}>
+     <Settings2 size={19}/>{!!boot?.historySync.issues.length&&<span className="sync-warning" title={t("{0} 项暂未同步", boot.historySync.issues.length)}/>}
     </button>
    </nav>
    <div className="desktop-stage">
     <WorkspaceLayout leftOpen={sidebar} rightOpen={!!inspector} hidden={!!settings} inactive={dialogOpen||updateLogOpen}
-     right={inspector!==null&&<Suspense fallback={<aside className="project-sidebar"><div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>正在打开项目侧栏…</div></aside>}>
+     right={inspector!==null&&<Suspense fallback={<aside className="project-sidebar"><div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>{t("正在打开项目侧栏…")}</div></aside>}>
        <ProjectSidebar key={sidebarProject} workspace={sidebarWorkspace} revision={c?.lastSyncAt}
         active={!!inspector&&!settings&&!dialogOpen&&!updateLogOpen} onChoose={()=>void choose()} canChoose={!busy&&!pending}
         link={sidebarLink?.project===sidebarProject?sidebarLink.target:undefined}/>
      </Suspense>}
      left={
-      <aside className="sidebar" aria-label="项目与对话">
+      <aside className="sidebar" aria-label={t("项目与对话")}>
        <div className="sidebar-head">
-        <strong>工作区</strong>
-        <button className="icon-button" title="收起侧边栏" aria-label="收起侧边栏" aria-expanded={true} onClick={()=>setSidebar(false)}><PanelLeftClose size={17}/></button>
+        <strong>{t("工作区")}</strong>
+        <button className="icon-button" title={t("收起侧边栏")} aria-label={t("收起侧边栏")} aria-expanded={true} onClick={()=>setSidebar(false)}><PanelLeftClose size={17}/></button>
        </div>
-       <button className="new-chat" disabled={pending} onClick={()=>newChat()}><SquarePen size={16}/>新对话<kbd>Ctrl N</kbd></button>
+       <button className="new-chat" disabled={pending} onClick={()=>newChat()}><SquarePen size={16}/>{t("新对话")}<kbd>Ctrl N</kbd></button>
        <ProjectList directories={boot?.projects??noProjects} conversations={chats} directory={directory} selectedId={id}
         disabled={!api||pending} onAdd={addProject} onSelect={selectProject}
         onNewChat={newChat} onOpenChat={load} onSync={syncProject}/>
@@ -292,29 +301,29 @@ export function App(){
      <main className="main">
       <header className="main-header">
        <div className="breadcrumbs">
-        {!sidebar&&<button className="icon-button" title="展开侧边栏" aria-label="展开侧边栏" aria-expanded={false} onClick={()=>setSidebar(true)}><PanelLeftOpen size={17}/></button>}
-        <button className="project-crumb" disabled={busy||pending||!api} onClick={()=>void choose()} title={directory||'选择工作目录'}>
-         <FolderOpen size={16}/><span>{c?.workspaceMissing?'选择工作目录':directory?projectName(directory):'选择工作目录'}</span>
+        {!sidebar&&<button className="icon-button" title={t("展开侧边栏")} aria-label={t("展开侧边栏")} aria-expanded={false} onClick={()=>setSidebar(true)}><PanelLeftOpen size={17}/></button>}
+        <button className="project-crumb" disabled={busy||pending||!api} onClick={()=>void choose()} title={directory||t("选择工作目录")}>
+         <FolderOpen size={16}/><span>{c?.workspaceMissing?t("选择工作目录"):directory?projectName(directory):t("选择工作目录")}</span>
         </button>
-        <ChevronRight size={13}/><strong title={c?.title}>{c?.title||'新对话'}</strong>
+        <ChevronRight size={13}/><strong title={displayTitle(t,c)}>{displayTitle(t,c)}</strong>
        </div>
        <div className="header-actions">
-        <button type="button" className="active-harness" aria-label={`配置 ${names[harness]}`}
-         title={runtime?.available===false?runtime.detail:`配置 ${names[harness]}`} disabled={!boot||pending} onClick={()=>setSettings(harness)}>
+        <button type="button" className="active-harness" aria-label={t("配置 {0}", names[harness])}
+         title={runtime?.available===false?t(runtime.detail):t("配置 {0}", names[harness])} disabled={!boot||pending} onClick={()=>setSettings(harness)}>
          <HarnessIcon h={harness}/><span>{names[harness]}</span>{runtime?.available===false&&<i className="harness-attention" aria-hidden="true"/>}
         </button>
         <div className="session-menu-wrap">
-         <button className="icon-button" title="会话菜单" aria-expanded={sessionMenu} disabled={!c} onClick={()=>setSessionMenu(!sessionMenu)}><Ellipsis size={19}/></button>
+         <button className="icon-button" title={t("会话菜单")} aria-expanded={sessionMenu} disabled={!c} onClick={()=>setSessionMenu(!sessionMenu)}><Ellipsis size={19}/></button>
          <div className="popover session-menu" role="menu" inert={!sessionMenu}>
-          <button role="menuitem" disabled={pending||!c} onClick={()=>{if(c)setHistoryScope({kind:'conversation',id:c.id});setSessionMenu(false);}}><RefreshCw size={14}/>设置对话同步</button>
-          <button role="menuitem" disabled={busy||pending||!c?.revision} onClick={()=>{setHistoryExportId(id||undefined);setHistoryOpen('export');setSessionMenu(false);}}><ArrowUpRight size={14}/>在独立 Harness 中继续</button>
-          <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setContextOpen(true);setSessionMenu(false);}}><FileJson2 size={14}/>查看统一上下文</button>
-          <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setSessionMenu(false);void api?.exportContext(id!).catch(e=>setError(message(e)));}}><Download size={14}/>导出上下文</button>
-          <button role="menuitem" onClick={()=>{setLogsOpen(true);setSessionMenu(false);}}><Terminal size={14}/>执行器日志</button>
+          <button role="menuitem" disabled={pending||!c} onClick={()=>{if(c)setHistoryScope({kind:'conversation',id:c.id});setSessionMenu(false);}}><RefreshCw size={14}/>{t("设置对话同步")}</button>
+          <button role="menuitem" disabled={busy||pending||!c?.revision} onClick={()=>{setHistoryExportId(id||undefined);setHistoryOpen('export');setSessionMenu(false);}}><ArrowUpRight size={14}/>{t("在独立 Harness 中继续")}</button>
+          <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setContextOpen(true);setSessionMenu(false);}}><FileJson2 size={14}/>{t("查看统一上下文")}</button>
+          <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setSessionMenu(false);void api?.exportContext(id!).catch(e=>setError(message(e)));}}><Download size={14}/>{t("导出上下文")}</button>
+          <button role="menuitem" onClick={()=>{setLogsOpen(true);setSessionMenu(false);}}><Terminal size={14}/>{t("执行器日志")}</button>
          </div>
         </div>
-        <button className={`icon-button ${inspector?'active':''}`} title={inspector?'收起项目侧栏':'展开项目侧栏'}
-         aria-label={inspector?'收起项目侧栏':'展开项目侧栏'} aria-expanded={!!inspector} onClick={()=>setInspector(!inspector)}>
+        <button className={`icon-button ${inspector?'active':''}`} title={inspector?t("收起项目侧栏"):t("展开项目侧栏")}
+         aria-label={inspector?t("收起项目侧栏"):t("展开项目侧栏")} aria-expanded={!!inspector} onClick={()=>setInspector(!inspector)}>
          {inspector?<PanelRightClose size={18}/>:<PanelRightOpen size={18}/>}
         </button>
        </div>
@@ -323,21 +332,21 @@ export function App(){
        onScroll={event=>{const area=event.currentTarget;follow.current=area.scrollHeight-area.scrollTop-area.clientHeight<130;}}>
        {!items.length?<div className="welcome">
         <div className="welcome-mark"><Logo/></div>
-        <h1>想法，从这里展开。</h1>
+        <h1>{t("想法，从这里展开。")}</h1>
         {directory?<button className="welcome-workspace" disabled={!api||pending||busy} onClick={()=>void choose()} title={directory}>
          <FolderOpen size={16}/><span>{projectName(directory)}</span><ChevronDown size={13}/>
-        </button>:<button className="welcome-workspace" disabled={!api||pending} onClick={()=>setProjectOpen(true)}><FolderPlus size={16}/>打开或创建项目</button>}
+        </button>:<button className="welcome-workspace" disabled={!api||pending} onClick={()=>setProjectOpen(true)}><FolderPlus size={16}/>{t("打开或创建项目")}</button>}
        </div>:<div className="messages">
         {transcript}
-        {busy&&<div className="working"><LoaderCircle size={15} className="spin"/>{labels[c!.state]}<span>{names[harness]}</span></div>}
+        {busy&&<div className="working"><LoaderCircle size={15} className="spin"/>{t(labels[c!.state])}<span>{names[harness]}</span></div>}
         <div ref={bottom}/>
        </div>}
       </div>
       <div className="composer-area">
-       {(error||c?.error)&&<div className="error-banner" role="alert">{error||c?.error}</div>}
-       {!api&&<div className="preview-note">通过 Tauri 桌面程序运行任务</div>}
+       {(error||c?.error)&&<div className="error-banner" role="alert">{t(error||c?.error)}</div>}
+       {!api&&<div className="preview-note">{t("通过 Tauri 桌面程序运行任务")}</div>}
        <div className="composer-meta">
-        <span className="conversation-state" role="status" aria-label="运行状态"><span className={`live-dot ${busy?'busy':''}`}/>{pending&&!busy?'正在准备':c?labels[c.state]:'等待任务'}</span>
+        <span className="conversation-state" role="status" aria-label={t("运行状态")}><span className={`live-dot ${busy?'busy':''}`}/>{pending&&!busy?t("正在准备"):c?t(labels[c.state]):t("等待任务")}</span>
         <ComposerUsage context={currentContext} harness={harness} usage={usage} onSettings={()=>{if(boot)setSettings('usage');}}/>
        </div>
        <div className="composer">
@@ -349,8 +358,8 @@ export function App(){
          <div className="composer-route">
           <div className="control-select">
            <ModelIcon family={preferred(selected)}/>
-           <select aria-label="选择模型" title={nativeCatalog?.currentModel ?? nativeModel(selected) ?? names[harness]} disabled={busy||pending} value={selected} onFocus={()=>setBrowseModels(true)} onChange={e=>void route(e.target.value,'auto')}>
-            {(!models.includes(selected)&&!catalogModel(selected)?[selected,...models]:models).map(value=><option key={value} value={value}>{nativeModel(value)??`${names[preferred(value)]} · 默认模型`}</option>)}
+           <select aria-label={t("选择模型")} title={nativeCatalog?.currentModel ?? nativeModel(selected) ?? names[harness]} disabled={busy||pending} value={selected} onFocus={()=>setBrowseModels(true)} onChange={e=>void route(e.target.value,'auto')}>
+            {(!models.includes(selected)&&!catalogModel(selected)?[selected,...models]:models).map(value=><option key={value} value={value}>{nativeModel(value)??t("{0} · 默认模型", names[preferred(value)])}</option>)}
             {agentHarnesses.map(engine => {
              const known = nativeCatalogs.get(catalogKey(engine, defaultModel(boot?.settings, engine)))?.models ?? [];
              const active = engine === harness ? nativeCatalog?.models ?? [] : [];
@@ -362,25 +371,25 @@ export function App(){
           </div>
           <div className="control-select harness-select">
            <HarnessIcon h={harness}/>
-           <select aria-label="选择 Harness" title={mode==='auto'?`自动匹配 · ${names[harness]}`:`手动选择 · ${names[harness]}`} disabled={busy||pending} value={mode} onChange={e=>void route(selected,e.target.value as 'auto'|Harness)}>
-            <option value="auto">自动 · {names[preferred(selected)]}</option>{harnesses.map(value=><option key={value} value={value}>{names[value]}</option>)}
+           <select aria-label={t("选择 Harness")} title={mode==='auto'?t("自动匹配 · {0}", names[harness]):t("手动选择 · {0}", names[harness])} disabled={busy||pending} value={mode} onChange={e=>void route(selected,e.target.value as 'auto'|Harness)}>
+            <option value="auto">{t("自动 ·")}{" "}{names[preferred(selected)]}</option>{harnesses.map(value=><option key={value} value={value}>{names[value]}</option>)}
            </select><ChevronDown size={12}/>
           </div>
          </div>
          <div className="composer-actions">
           {capability.levels.length>0&&<ReasoningControl key={reasoningKey(selected,harness)} modelId={nativeCatalog?.currentModel??nativeModel(selected)??selected} levels={capability.levels} value={chosenReasoning} fallback={configuredReasoning} disabled={busy||pending} onChange={level=>void reasoning(level)}/>}
-          {busy?<button className="send-button" title="暂停任务" aria-label="暂停任务" onClick={()=>void api?.stop(id!).catch(e=>setError(message(e)))}><Square size={11} fill="currentColor"/></button>
-           :<button className="send-button" title="发送任务（Enter）" aria-label="发送任务" disabled={!directory||!draft.trim()||draft.trim()==='/'||pending||!api||!!c?.workspaceMissing} onClick={()=>void send()}>
+          {busy?<button className="send-button" title={t("暂停任务")} aria-label={t("暂停任务")} onClick={()=>void api?.stop(id!).catch(e=>setError(message(e)))}><Square size={11} fill="currentColor"/></button>
+           :<button className="send-button" title={t("发送任务（Enter）")} aria-label={t("发送任务")} disabled={!directory||!draft.trim()||draft.trim()==='/'||pending||!api||!!c?.workspaceMissing} onClick={()=>void send()}>
             {pending?<LoaderCircle size={15} className="spin"/>:<ArrowUp size={16}/>}
            </button>}
          </div>
         </div>
        </div>
-       {mode!=='auto'&&harness!==preferred(selected)&&<div className="composer-footer">使用手动 Harness 的连接设置，服务端需支持当前模型</div>}
+       {mode!=='auto'&&harness!==preferred(selected)&&<div className="composer-footer">{t("使用手动 Harness 的连接设置，服务端需支持当前模型")}</div>}
       </div>
      </main>
     </WorkspaceLayout>
-    {settings&&boot&&<Suspense fallback={<div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>正在打开设置…</div>}>
+    {settings&&boot&&<Suspense fallback={<div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>{t("正在打开设置…")}</div>}>
      <SettingsDialog settings={boot.settings} conversations={chats} currentId={id||undefined} initialTab={settings} currentHarness={harness} usage={usage}
      onThemePreview={setThemePreview} onAccentPreview={setAccentPreview} onClose={closeSettings} onSaved={refresh}
      appUpdate={appUpdate} onShowUpdateLog={()=>setUpdateLogOpen(true)}
@@ -392,13 +401,14 @@ export function App(){
   {updateLogOpen&&<AppUpdateLog update={appUpdate} onClose={()=>setUpdateLogOpen(false)}/>}
   {projectOpen&&<ProjectDialog onClose={()=>setProjectOpen(false)} onProject={project=>{rememberProject(project);newChat(project);setSidebar(true);setProjectOpen(false);}}/>}
   {historyOpen&&<HistoryDialog conversation={historyOpen==='export'?chats.find(v=>v.id===(historyExportId||id)):undefined} onClose={()=>setHistoryOpen(null)} onImported={chat=>{setHistoryOpen(null);void refresh().then(()=>load(chat));}}/>}
-  {historyScope&&<HistoryExportDialog scope={historyScope} title={historyScope.kind==='project'?historyScope.workspace:chats.find(chat=>chat.id===historyScope.id)?.title??'对话'} onClose={()=>setHistoryScope(null)}/>}
+  {historyScope&&<HistoryExportDialog scope={historyScope} title={historyScope.kind==='project'?historyScope.workspace:chats.find(chat=>chat.id===historyScope.id)?.title??t("对话")} onClose={()=>setHistoryScope(null)}/>}
   {contextOpen&&c&&<ContextDialog key={c.id} id={c.id} revision={c.revision} onClose={()=>setContextOpen(false)}/>}
-  {logsOpen&&<div className="modal-backdrop" onClick={()=>setLogsOpen(false)}><section className="context-modal logs-modal" role="dialog" aria-label="执行器日志" onClick={e=>e.stopPropagation()}><header><div><Terminal size={18}/><strong>执行器日志</strong></div><button className="icon-button" title="关闭日志" onClick={()=>setLogsOpen(false)}><X size={18}/></button></header><pre>{logs.length?logs.join('\n'):'当前会话暂无诊断日志。'}</pre></section></div>}
-  {approval&&<div className="modal-backdrop"><section className="approval-modal"><ShieldCheck size={28}/><h2>{approval.title}</h2><pre>{approval.detail}</pre>{approval.kind==='question'&&<textarea placeholder="输入你的回答" value={answer} onChange={e=>setAnswer(e.target.value)}/>}<footer><button className="secondary-button" onClick={()=>void api?.answerApproval(approval.id,false).catch(e=>setError(message(e)))}>拒绝 / 取消</button><button className="primary-button" onClick={()=>void api?.answerApproval(approval.id,true,answer).then(()=>setAnswer('')).catch(e=>setError(message(e)))}>{approval.kind==='question'?'提交回答':'仅允许本次'}</button></footer></section></div>}
+  {logsOpen&&<div className="modal-backdrop" onClick={()=>setLogsOpen(false)}><section className="context-modal logs-modal" role="dialog" aria-label={t("执行器日志")} onClick={e=>e.stopPropagation()}><header><div><Terminal size={18}/><strong>{t("执行器日志")}</strong></div><button className="icon-button" title={t("关闭日志")} onClick={()=>setLogsOpen(false)}><X size={18}/></button></header><pre>{logs.length?logs.join('\n'):t("当前会话暂无诊断日志。")}</pre></section></div>}
+  {approval&&<div className="modal-backdrop"><section className="approval-modal"><ShieldCheck size={28}/><h2>{t(approval.title)}</h2><pre>{t(approval.detail)}</pre>{approval.kind==='question'&&<textarea placeholder={t("输入你的回答")} value={answer} onChange={e=>setAnswer(e.target.value)}/>}<footer><button className="secondary-button" onClick={()=>void api?.answerApproval(approval.id,false).catch(e=>setError(message(e)))}>{t("拒绝 / 取消")}</button><button className="primary-button" onClick={()=>void api?.answerApproval(approval.id,true,answer).then(()=>setAnswer('')).catch(e=>setError(message(e)))}>{approval.kind==='question'?t("提交回答"):t("仅允许本次")}</button></footer></section></div>}
  </div>;
 }
 function ContextDialog({id,revision,onClose}:{id:string;revision:number;onClose():void}){
+ const { t } = useI18n();
  const [context,setContext]=useState<ContextDetails>(),[error,setError]=useState('');
  useEffect(()=>{
   let active=true;
@@ -406,16 +416,17 @@ function ContextDialog({id,revision,onClose}:{id:string;revision:number;onClose(
   return()=>{active=false;};
  },[id]);
  const text=useMemo(()=>context?JSON.stringify(context.canonical,null,2):'', [context]);
- return <div className="modal-backdrop" onClick={onClose}><section className="context-modal" role="dialog" aria-label="统一上下文" onClick={e=>e.stopPropagation()}>
-  <header><div><FileJson2 size={18}/><strong>统一上下文</strong><span>revision {revision}</span></div><button className="icon-button" title="关闭上下文" onClick={onClose}><X size={18}/></button></header>
-  {context?.path&&<p>{context.path}</p>}{error&&<p role="alert">{error}</p>}
-  {context?<pre>{text}</pre>:!error&&<p role="status">正在读取上下文…</p>}
-  <footer><span>完整归档与有效恢复上下文</span><button className="primary-button" onClick={()=>void api?.exportContext(id).catch(e=>setError(message(e)))}><Download size={14}/>导出 JSON</button></footer>
+ return <div className="modal-backdrop" onClick={onClose}><section className="context-modal" role="dialog" aria-label={t("统一上下文")} onClick={e=>e.stopPropagation()}>
+  <header><div><FileJson2 size={18}/><strong>{t("统一上下文")}</strong><span>{t("修订 {0}", revision)}</span></div><button className="icon-button" title={t("关闭上下文")} onClick={onClose}><X size={18}/></button></header>
+  {context?.path&&<p>{context.path}</p>}{error&&<p role="alert">{t(error)}</p>}
+  {context?<pre>{text}</pre>:!error&&<p role="status">{t("正在读取上下文…")}</p>}
+  <footer><span>{t("完整归档与有效恢复上下文")}</span><button className="primary-button" onClick={()=>void api?.exportContext(id).catch(e=>setError(message(e)))}><Download size={14}/>{t("导出 JSON")}</button></footer>
  </section></div>;
 }
 const Message=memo(function Message({item}:{item:DisplayItem}){
- if(item.kind==='notice')return <div className="notice"><CheckCheck size={13}/>{item.text}</div>;
- if(item.kind==='tool'||item.kind==='reasoning'||item.kind==='command')return <details className={`tool-message ${item.kind}`}><summary>{item.kind==='reasoning'?<Activity size={14}/>:<Terminal size={14}/>}<span>{item.kind==='reasoning'?'思考过程':item.kind==='command'?'/'+(item.commandName||'命令'):item.toolName||'工具执行'}</span>{item.status==='running'?<LoaderCircle size={13} className="spin"/>:item.status==='error'?<X size={13}/>:<Check size={13}/>}<ChevronRight size={13}/></summary><div>{item.input&&<pre>{item.input}</pre>}{item.text&&<pre>{item.text}</pre>}</div></details>;
+ const { t, locale } = useI18n();
+ if(item.kind==='notice')return <div className="notice"><CheckCheck size={13}/>{t(item.text)}</div>;
+ if(item.kind==='tool'||item.kind==='reasoning'||item.kind==='command')return <details className={`tool-message ${item.kind}`}><summary>{item.kind==='reasoning'?<Activity size={14}/>:<Terminal size={14}/>}<span>{item.kind==='reasoning'?t("思考过程"):item.kind==='command'?'/'+(item.commandName||t("命令")):item.toolName||t("工具执行")}</span>{item.status==='running'?<LoaderCircle size={13} className="spin"/>:item.status==='error'?<X size={13}/>:<Check size={13}/>}<ChevronRight size={13}/></summary><div>{item.input&&<pre>{item.input}</pre>}{item.text&&<pre>{item.text}</pre>}</div></details>;
  const date=new Date(item.time);
- return <article className={`message ${item.kind}`}><div className="message-heading">{item.kind==='user'?<span className="user-avatar">你</span>:<HarnessIcon h={item.harness}/>}<strong>{item.kind==='user'?'你':names[item.harness]}</strong><time>{Number.isFinite(date.getTime())?messageTime.format(date):''}</time></div><div className="message-body"><ChatMarkdown text={item.text}/></div></article>;
+ return <article className={`message ${item.kind}`}><div className="message-heading">{item.kind==='user'?<span className="user-avatar">{t("你")}</span>:<HarnessIcon h={item.harness}/>}<strong>{item.kind==='user'?t("你"):names[item.harness]}</strong><time>{Number.isFinite(date.getTime())?messageTimes[locale].format(date):''}</time></div><div className="message-body"><ChatMarkdown text={item.kind==='error'?t(item.text):item.text}/></div></article>;
 });
