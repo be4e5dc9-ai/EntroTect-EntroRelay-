@@ -1,0 +1,11 @@
+{
+  "version": "0.8.0-beta.1",
+  "notes": "- 首个公开 Beta，Windows x64 安装版与便携版内置五种 Harness。\n- EntroRelay 支持跨 Harness 上下文转换、历史归档和按项目或对话控制同步目标。\n- 对话中的文件引用可在右侧栏打开，支持行号定位和高亮。\n- 新增独立网页预览，支持 localhost、前进后退、刷新和外部浏览器。\n- 优化流式回复时的项目列表渲染，无同步范围时跳过后台原生历史扫描。\n- 修复同一对话并发操作提前释放同步保护的问题。\n- 支持 Beta 更新源、安装包签名验证和应用内更新日志。\n- 项目采用 Apache-2.0。英文界面与英文使用文档已列入后续计划。",
+  "pub_date": "2026-11-11T11:52:31.022Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWWIrU1pGci9CMmlZOTFWSitGV1dXOEFFYVNSSTlVYVZQNkRTNHViQWQ4YWt2Z0VhRDJ6NWhkRHpWTUdLK09SSG41ckljN2ZvYVZ3WllQRCt6aGIvaXFJYWdvVktWUVFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mzk3OTUwCWZpbGU6RW50cm9UZWN0XzAuOC4wLWJldGEuMV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC44LjAtYmV0YS4xCmlURWFpZHF2MW9Qb05kOXorY2kyNjZtaGZzNG85QTBObmZ6clgvQTNEbEE1ME5RWXozVTFoOWJNWDN5Snlka2M3YU02RXdaSGl5RGszS1NFdU8vTUNRPT0K",
+      "url": "https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/download/v0.8.0-beta.1/EntroTect_0.8.0-beta.1_x64-setup.exe"
+    }
+  }
+}
