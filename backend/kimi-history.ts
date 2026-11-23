@@ -3,7 +3,7 @@ import { appendFile, link, mkdir, readFile, readdir, realpath, rename, rm, stat,
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { completedEntries, portableMessages, portableText, toolArguments, type PortableEntry, type PortableTool } from './portable-history';
+import { completedEntries, portableHistoryFingerprint, portableMessages, portableText, toolArguments, type PortableEntry, type PortableTool } from './portable-history';
 import { atomicFile, atomicJson } from './store';
 import { sumReportedTokens, type NativeTokenReport } from './token-activity';
 
@@ -160,13 +160,24 @@ function kimiTurns(entries: readonly PortableEntry[], now: number, previousTurn 
   return { wire, lastPrompt, hasReply };
 }
 
-export async function writeKimiHistory(home: string, cwd: string, title: string, messages: readonly PortableEntry[]) {
+export async function writeKimiHistory(home: string, cwd: string, title: string, messages: readonly PortableEntry[], allocated?: (id: string) => Promise<void>, reservedId?: string) {
   if (!path.isAbsolute(home) || !path.isAbsolute(cwd) || !messages.length) throw new Error('Kimi Code 历史目录或上下文无效');
-  const id = `ses_${randomUUID()}`;
+  const id = reservedId ?? `ses_${randomUUID()}`;
+  if (!/^ses_[a-zA-Z0-9-]{1,100}$/.test(id)) throw new Error('Kimi Code 会话 ID 无效');
+  await allocated?.(id);
   const parent = path.join(home, 'sessions', bucket(cwd));
   const directory = path.join(parent, id);
-  const staging = path.join(parent, `.${id}.tmp`);
+  const staging = path.join(parent, `.${id}.${randomUUID()}.tmp`);
   const now = Date.now();
+  if (reservedId && await stat(directory).then(() => true, error => { if (error.code !== 'ENOENT') throw error; return false; })) {
+    const existing = await readKimiHistory(home, cwd, id);
+    if (portableHistoryFingerprint(existing.history) !== portableHistoryFingerprint(messages)) throw new Error('未完成发布的 Kimi 会话已有其他内容');
+    const index = path.join(home, 'session_index.jsonl');
+    const indexed = (await readFile(index,'utf8').catch(error => { if(error.code!=='ENOENT')throw error; return ''; }))
+      .split(/\r?\n/).some(line => { try {return JSON.parse(line).sessionId === id;}catch{return false;} });
+    if (!indexed) await appendFile(index,JSON.stringify({sessionId:id,sessionDir:directory,workDir:cwd})+'\n','utf8');
+    return {id,directory};
+  }
   const { wire, lastPrompt, hasReply } = kimiTurns(messages, now);
   wire.unshift({ type: 'metadata', protocol_version: '1.0', created_at: now });
   const state = {
@@ -187,13 +198,14 @@ export async function writeKimiHistory(home: string, cwd: string, title: string,
   return { id, directory };
 }
 
-export async function kimiHistoryVersion(home: string, cwd: string, id: string) {
+export async function kimiHistoryMetadata(home: string, cwd: string, id: string) {
   const directory = await sessionFolder(home, cwd, id);
-  const files = await Promise.all([kimiStateFile(directory).then(file => stat(file)), stat(path.join(directory, 'agents', 'main', 'wire.jsonl'))]);
-  return files.map(file => `${file.size}:${file.mtimeMs}`).join('/');
+  const state = await kimiStateFile(directory);
+  const [stateFile, wire, metadata] = await Promise.all([stat(state),stat(path.join(directory,'agents','main','wire.jsonl')),readFile(state,'utf8')]);
+  return { version:[stateFile,wire].map(file=>`${file.size}:${file.mtimeMs}`).join('/'),createdAt:JSON.parse(metadata).createdAt };
 }
 
-export async function appendKimiHistory(home: string, cwd: string, id: string, expected: string, messages: readonly PortableEntry[]) {
+export async function appendKimiHistory(home: string, cwd: string, id: string, expected: string, messages: readonly PortableEntry[], replace = false) {
   await sessionFolder(home, cwd, id);
   const lock = path.join(home, 'locks', 'sessions', `${id}.lock`);
   const token = `${process.pid}:${randomUUID()}`;
@@ -208,8 +220,9 @@ export async function appendKimiHistory(home: string, cwd: string, id: string, e
     const native = await readKimiHistory(home, cwd, id);
     if (native.version !== expected || native.busy) throw new Error('Kimi Code 会话已更新或还未结束');
     const now = Date.now();
-    const { wire, lastPrompt, hasReply } = kimiTurns(messages, now, native.turnId);
-    await atomicFile(native.wireFile, native.wireRaw.trimEnd() + '\n' + wire.map(row => JSON.stringify(row)).join('\n') + '\n', native.wireRaw);
+    const { wire, lastPrompt, hasReply } = kimiTurns(messages, now, replace ? -1 : native.turnId);
+    const prefix = replace ? JSON.stringify({ type: 'metadata', protocol_version: '1.0', created_at: native.state.createdAt }) : native.wireRaw.trimEnd();
+    await atomicFile(native.wireFile, prefix + '\n' + wire.map(row => JSON.stringify(row)).join('\n') + '\n', native.wireRaw);
     await atomicJson(native.stateFile, { ...native.state, updatedAt: now, lastPrompt: lastPrompt.slice(0, 200) || native.state.lastPrompt, lastTurnReason: hasReply ? 'completed' : 'cancelled' }, native.stateRaw);
   } finally {
     const holder = await readFile(lock, 'utf8').then(JSON.parse).catch(() => undefined);

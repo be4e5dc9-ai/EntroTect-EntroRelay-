@@ -170,13 +170,14 @@ export class Controller {
     const now = Date.now();
     return { id, title: '新对话', workspace, harness, createdAt: now, updatedAt: now, revision: 0, state: 'idle', bindings: {} };
   }
-  async create(workspace: string, harness: Harness) {
+  async create(workspace: string, harness: Harness, origin?: import('../shared/types').NativeHistorySource) {
     if (!path.isAbsolute(workspace) || !(await stat(workspace)).isDirectory()) throw new Error('请选择有效的工作目录');
     if (this.shuttingDown) throw new Error('应用正在退出');
     const draft = this.drafts.get(harness);
     const reusable = draft && projectKey(draft.workspace) === projectKey(workspace) ? draft : undefined;
     if (reusable) this.drafts.delete(harness);
     const c = this.newConversation(workspace, harness, reusable?.id);
+    if (origin) c.origin = { source: origin, workspace };
     await this.store.save(c); return c;
   }
   async exclusive<T>(id: string, action: (c: Conversation) => Promise<T>) {

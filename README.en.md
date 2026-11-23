@@ -6,9 +6,9 @@
 
 EntroTect is a Tauri 2 desktop app that matches models to their native Harnesses and lets you override the choice for each chat. EntroRelay is the built-in context engine. It keeps chat history, converts the context needed to resume, and connects sessions across Harnesses.
 
-**0.8.0 Beta 2** supports **Windows x64** with English and Simplified Chinese interfaces.
+**0.8.1 Beta 1** supports **Windows x64** with English and Simplified Chinese interfaces.
 
-[Download the beta](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/tag/v0.8.0-beta.2) · [Changelog](CHANGELOG.en.md) · [Report an issue](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/issues) · [Apache-2.0](LICENSE)
+[Download the beta](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/releases/tag/v0.8.1-beta.1) · [Changelog](CHANGELOG.en.md) · [Report an issue](https://github.com/be4e5dc9-ai/EntroTect-EntroRelay-/issues) · [Apache-2.0](LICENSE)
 
 ![EntroTect workspace and file preview in a demo project](docs/images/workspace.png)
 
@@ -16,7 +16,7 @@ EntroTect is a Tauri 2 desktop app that matches models to their native Harnesses
 
 - Pick a model and let EntroTect match its Harness, or choose one manually. Set reasoning effort using the levels supported by the model.
 - Group chats by project folder, search recent conversations, and resume a saved chat with another Harness between turns.
-- Choose which histories to import and which Harnesses receive exports, down to a single project or chat.
+- Choose which Harnesses, projects, or chats to sync and where to send them in the sync blueprint.
 - View native tool calls, reasoning, slash commands, and permission requests as the Harness exposes them.
 - Open file references at their line numbers. Browse images, Git diffs, and HTTP, HTTPS, or localhost pages in the sidebar.
 - Start selected Harnesses with the app, reuse compatible processes between turns, and pause with native cancellation.
@@ -67,11 +67,11 @@ EntroRelay ships as part of EntroTect. The implementation starts in `backend/cod
 
 ## Manage history sync
 
-Automatic import and export are enabled by default for selected or linked histories. Use **Import chat history** to scan local Harnesses, then choose which chats or projects to add.
+Open **Import chat history** from the first-launch prompt or the sidebar. In the sync blueprint, expand a sender to browse its native projects and chats. Connect the sender's port to sync the whole Harness, or use an individual project or chat port. Choose the EntroTect workspace to import a chat locally. Connecting a standalone Harness also adds the chat to the workspace.
 
-A project can select export targets, and a chat can override its project's rule. The global controls and manual actions are under **History and sync**.
+Project links include future chats from the same origin. Individual chats can add or exclude targets. You can choose an origin when creating a project or chat, and keep it when switching models. Settings control automatic imports and exports. The blueprint can also sync on demand.
 
-EntroTect checks native records for changes before import and export. Export can wait while a standalone client is using a session. If both sides add messages, EntroTect can keep a separate branch. A Harness running against its native data directory may also write its own records.
+Continue a linked chat at any participating endpoint and EntroRelay updates the existing sessions. If two endpoints diverge, compare their new messages in the blueprint and keep one version or both branches. Older records with uncertain origins can be reviewed individually or by project.
 
 ## Work with files, Git, and pages
 

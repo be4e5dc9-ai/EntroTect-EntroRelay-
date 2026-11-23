@@ -4,6 +4,10 @@ import { listen } from '@tauri-apps/api/event';
 declare global { interface Window { entrotect?: DesktopApi } }
 const call=<T,>(method:string,params:Record<string,unknown>={})=>invoke<T>('desktop_call',{method,params,locale:document.documentElement.lang});
 const tauriApi:DesktopApi={
+  blueprint:()=>call('blueprint:state'),blueprintCatalog:harness=>call('blueprint:catalog',{harness}),
+  blueprintRule:(scope,target,enabled)=>call('blueprint:rule',{scope,target,enabled}),
+  blueprintConfirm:(scopes,classification)=>call('blueprint:confirm',{scopes,classification}),
+  blueprintResolve:(id,choice)=>call('blueprint:resolve',{id,choice}),blueprintDismiss:()=>call('blueprint:dismiss'),
   appUpdateStatus:()=>call('app:updateStatus'),checkAppUpdate:()=>call('app:checkUpdate'),installAppUpdate:()=>call('app:installUpdate'),
   launchAgentLogin:harness=>call('agent:login',{harness}),
   nativeModels:scope=>call('models:native',scope),
@@ -16,10 +20,10 @@ const tauriApi:DesktopApi={
   setHistoryImportRule:rule=>call('history:import-selection',{rule}),
   importHistory:request=>call('history:import',{request}),exportHistory:request=>call('history:export',{request}),chooseDatabase:()=>call('dialog:database'),
   bootstrap:()=>call('bootstrap'),rememberRuntime:selection=>call('runtime:selection',{...selection}),
-  addProject:workspace=>call('project:add',{workspace}),
-  createProject:(parent,name)=>call('project:create',{parent,name}),accountUsage:(harness,refresh)=>call('account:usage',{harness,refresh}),
+  addProject:(workspace,originHarness)=>call('project:add',{workspace,originHarness}),
+  createProject:(parent,name,originHarness)=>call('project:create',{parent,name,originHarness}),accountUsage:(harness,refresh)=>call('account:usage',{harness,refresh}),
   tokenActivity:()=>call('account:activity'),
-  createConversation:(workspace,harness)=>call('conversation:create',{workspace,harness}),
+  createConversation:(workspace,harness,originHarness)=>call('conversation:create',{workspace,harness,originHarness}),
   loadConversation:id=>call('conversation:load',{id}),send:(id,text)=>call('conversation:send',{id,text}),
   stop:id=>call('conversation:stop',{id}),switchHarness:(id,harness)=>call('conversation:switch',{id,harness}),
   selectModel:(id,modelId,harness)=>call('conversation:selection',{id,modelId,harness}),

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentClient } from './agent-client';
-import { codexHistoryItems, portableMessages, portableText, type PortableEntry, type PortableMessage, type PortableTool } from './portable-history';
+import { codexHistoryItems, portableMessages, portableText, unpublishedEntries, type PortableEntry, type PortableMessage, type PortableTool } from './portable-history';
 import { atomicFile } from './store';
 
 function responseMessage(item: any, time: number): PortableMessage | undefined {
@@ -68,10 +68,20 @@ export async function readCodexHistory(client: AgentClient, home: string, id: st
   return { thread, file, version: createHash('sha256').update(raw).digest('hex'), history, retained, archived: portableMessages(history), resume: portableMessages(retained), busy: thread.status?.type === 'active', listed };
 }
 
-export async function writeCodexHistory(client: AgentClient, cwd: string, title: string, messages: readonly PortableEntry[]) {
+export async function writeCodexHistory(client: AgentClient, cwd: string, title: string, messages: readonly PortableEntry[], allocated?: (id: string) => Promise<void>, reserved?: {home:string;id:string}) {
   if (!messages.length) throw new Error('没有可导入 Codex 的上下文');
-  const session = await client.open(cwd);
-  await client.inject(session.id, codexHistoryItems(messages));
+  let existing;
+  if (reserved) {
+    try { existing = await readCodexHistory(client, reserved.home, reserved.id); }
+    catch (error) {
+      // A crash before the first injection can leave an unpersisted thread.
+      if (!/thread not loaded|no rollout found|thread not found/i.test((error as Error).message)) throw error;
+    }
+  }
+  const session = await client.open(cwd,existing ? reserved!.id : undefined);
+  await allocated?.(session.id);
+  const delta=existing ? unpublishedEntries(existing.history,messages) : messages;
+  if(delta.length)await client.inject(session.id, codexHistoryItems(delta));
   await client.rpc.request('thread/name/set', { threadId: session.id, name: title }, 15_000);
   return session;
 }
@@ -112,4 +122,18 @@ async function indexNewCodexThread(home: string, rollout: string, id: string, me
       return;
     } finally { db.close(); }
   }
+}
+
+export async function replaceCodexHistory(native: Awaited<ReturnType<typeof readCodexHistory>>, messages: readonly PortableEntry[]) {
+  const id = native.thread.id;
+  const raw = await readFile(native.file, 'utf8');
+  const rows = raw.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  if (createHash('sha256').update(raw).digest('hex') !== native.version || rows[0]?.type !== 'session_meta' || rows[0]?.payload?.id !== id)
+    throw new Error('Codex 原会话已更新，请重新比较两个分支');
+  const first = portableMessages(messages).find(entry => entry.role === 'user');
+  if (!first) throw new Error('原生会话缺少用户消息');
+  const stamped = (type: string, payload: unknown, time: number) => ({ timestamp: new Date(time || Date.now()).toISOString(), type, payload });
+  const records = [rows[0], stamped('event_msg', { type: 'user_message', message: first.text, images: [], local_images: [], text_elements: [] }, first.time)];
+  for (const item of codexHistoryItems(messages)) records.push(stamped('response_item', item, Date.now()));
+  await atomicFile(native.file, records.map(row => JSON.stringify(row)).join('\n') + '\n', raw);
 }

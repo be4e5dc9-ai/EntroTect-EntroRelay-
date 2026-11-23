@@ -47,6 +47,7 @@ function appUpdateMessage(t: Translate, update?: AppUpdateStatus, automatic = tr
 }
 
 type SettingsProps = {
+  hidden?: boolean;
   settings: SettingsView;
   conversations: Conversation[];
   currentId?: string;
@@ -63,7 +64,7 @@ type SettingsProps = {
   onExport(id: string): void;
 };
 
-export function SettingsDialog({ settings, conversations, currentId, initialTab, currentHarness, usage, appUpdate, onShowUpdateLog, onThemePreview, onAccentPreview, onClose, onSaved, onImport, onExport }: SettingsProps) {
+export function SettingsDialog({ hidden, settings, conversations, currentId, initialTab, currentHarness, usage, appUpdate, onShowUpdateLog, onThemePreview, onAccentPreview, onClose, onSaved, onImport, onExport }: SettingsProps) {
   const { t, locale } = useI18n();
   const [value, setValue] = useState<SettingsView>(() => structuredClone(settings));
   const [tab, setTab] = useState(initialTab);
@@ -111,13 +112,13 @@ export function SettingsDialog({ settings, conversations, currentId, initialTab,
   }, [tab, usageHarness, usage.request]);
   useEffect(() => {
     function close(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || busy || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || hidden || busy || event.defaultPrevented) return;
       if (CSS.supports('selector(select:open)') && document.querySelector('.settings-modal select:open')) return;
       onClose();
     }
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
-  }, [busy, onClose]);
+  }, [busy, hidden, onClose]);
 
   function field<K extends keyof LaunchConfig>(key: K, content: LaunchConfig[K]) {
     if (!config) return;
@@ -168,7 +169,7 @@ export function SettingsDialog({ settings, conversations, currentId, initialTab,
   const nav = (id: SettingsTab, label: string, icon: React.ReactNode) => <button key={id} className={id === tab ? 'selected' : ''} aria-current={id === tab ? 'page' : undefined}
     onClick={() => { setTab(id); setError(''); }}>{icon}{label}</button>;
 
-  return <section className="settings-modal" role="dialog" aria-modal="true" aria-label={t("设置与连接")}>
+  return <section className="settings-modal" hidden={hidden} inert={hidden} role="dialog" aria-modal="true" aria-label={t("设置与连接")}>
     <aside className="settings-rail">
       <button className="settings-back" title={t("关闭设置")} disabled={busy} onClick={onClose}><ArrowLeft size={16}/>{t("返回工作区")}</button>
       <h1>{t("设置")}</h1>
@@ -318,20 +319,16 @@ export function SettingsDialog({ settings, conversations, currentId, initialTab,
         {tab === 'history' && <>
           <h2>{t("历史与同步")}</h2><p className="settings-description">{t("扫描独立 Harness 的历史，并按对话或项目的规则同步。")}</p>
           <div className="settings-card">
-            <div className="preference-switch-row"><div><strong>{t("自动导入历史对话")}</strong><p>{t("在「导入历史」中选择对话或项目。")}</p></div><button role="switch" aria-label={t("自动导入历史对话")} aria-checked={preferences.autoImport} className="preference-switch" onClick={() => setHistory({ autoImport: !preferences.autoImport })}><span/></button></div>
+            <div className="preference-switch-row"><div><strong>{t("自动导入历史对话")}</strong><p>{t("仅导入在同步蓝图中已连接的项目和对话。")}</p></div><button role="switch" aria-label={t("自动导入历史对话")} aria-checked={preferences.autoImport} className="preference-switch" onClick={() => setHistory({ autoImport: !preferences.autoImport })}><span/></button></div>
             <div className="preference-switch-row"><div><strong>{t("自动导出对话")}</strong><p>{t("在项目或对话菜单中选择目标 Harness。")}</p></div><button role="switch" aria-label={t("自动导出对话")} aria-checked={preferences.autoExport} className="preference-switch" onClick={() => setHistory({ autoExport: !preferences.autoExport })}><span/></button></div>
-            <div className="form-row">
-              <label className="form-field">{t("默认导入范围")}<select value={preferences.importScope ?? 'selected'} onChange={event => setHistory({ importScope: event.target.value === 'all' ? 'all' : 'selected' })}><option value="selected">{t("已选择或已加入的对话")}</option><option value="all">{t("所有扫描到的对话")}</option></select></label>
-              <label className="form-field">{t("默认导出范围")}<select value={preferences.exportScope ?? 'selected'} onChange={event => setHistory({ exportScope: event.target.value === 'all' ? 'all' : 'selected' })}><option value="selected">{t("已选择的目标")}</option><option value="all">{t("所有已配置的目标")}</option></select></label>
-            </div>
-            <p className="settings-info">{t("两端同时新增内容时保留分支。独立客户端打开时暂缓写回，退出后继续。")}</p>
+            <p className="settings-info">{t("只有蓝图中已连接的项目和对话会同步。两端同时续聊时，可在蓝图中选择要保留的分支。")}</p>
             <details className="advanced-settings"><summary>{t("同步数据路径")}</summary>{harnesses.map(source => <label className="form-field" key={source}>{harnessNames[source]} {source === 'zcode' ? t("数据库") : t("数据目录")}<div className="path-input"><input aria-label={t("{0} 同步路径", source)} value={preferences.sources?.[source] ?? ''} placeholder={t("留空使用原生路径")}
               onChange={event => setHistory({ sources: { ...preferences.sources, [source]: event.target.value } })}/><button className="icon-button" title={t("选择 {0} 同步路径", source)}
               onClick={() => void pick(source === 'zcode' ? api!.chooseDatabase : api!.chooseDirectory, location => setHistory({ sources: { ...preferences.sources, [source]: location } }))}><FolderOpen size={15}/></button></div></label>)}</details>
           </div>
           <div className="settings-card preference-sync-status" role="status" aria-label={t("历史同步状态")}>
             <div>{sync?.running ? <LoaderCircle size={15} className="spin"/> : <Check size={15}/>}<strong>{sync?.running ? t("正在后台同步") : sync?.lastSyncAt ? t("上次检查 {0}", new Date(sync.lastSyncAt).toLocaleTimeString(locale)) : t("等待后台检查")}</strong>
-              <button className="secondary-button" title={t("立即同步历史")} disabled={busy || sync?.running || (!preferences.autoImport && !preferences.autoExport)} onClick={() => void synchronize()}><RefreshCw size={13}/>{t("立即同步")}</button></div>
+              <button className="secondary-button" title={t("立即同步历史")} disabled={busy || sync?.running} onClick={() => void synchronize()}><RefreshCw size={13}/>{t("立即同步")}</button></div>
             {!!sync?.issues.length && <details><summary>{t("{0} 项暂未同步", sync.issues.length)}</summary>{sync.issues.map((issue, index) => <p key={index}>{t(issue)}</p>)}</details>}
           </div>
           <div className="settings-card preference-manual"><h3>{t("手动操作")}</h3><button className="secondary-button" disabled={busy} onClick={onImport}><ArrowDownToLine size={14}/>{t("手动导入历史")}</button>
@@ -345,7 +342,7 @@ export function SettingsDialog({ settings, conversations, currentId, initialTab,
             <div className="segmented" aria-label={t("连接方式")}><button aria-pressed={config.authMode === 'native'} onClick={() => field('authMode', 'native')}>{t("复用原生登录")}</button><button aria-pressed={config.authMode === 'api'} onClick={() => field('authMode', 'api')}>{t("使用 API Key")}</button></div>
             {config.authMode === 'native' ? <>
               <p className="settings-info">{config.isolatedNative && supportsIsolatedLogin(h) ? t("在应用专用目录登录套餐账号。对话由历史同步导入和写回独立端。") :
-                t("请先在对应 Harness 中登录。{0}", h === 'zcode' ? t("ZCode 从数据基目录下的 .zcode 文件夹读取登录。") : supportsIsolatedLogin(h) ? t("此连接与独立端共用原生会话目录。") : '')}</p>
+                t("请先在对应 Harness 中登录。{0}", h === 'zcode' ? t("ZCode 从数据基目录下的 .zcode 文件夹读取登录。") : supportsIsolatedLogin(h) ? t("通过同步蓝图选择向独立端公开的对话。") : '')}</p>
               {supportsIsolatedLogin(h) && <div className="isolated-login">
                 <div className="preference-switch-row">
                   <div><strong>{t("在 EntroTect 中独立登录")}</strong><p>{t("分别保存套餐登录和运行中的会话。")}</p></div>

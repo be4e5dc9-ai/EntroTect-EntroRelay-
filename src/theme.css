@@ -99,6 +99,12 @@ kbd { background: var(--hover); border: 1px solid var(--line); border-radius: 4p
 .rail-spacer { flex: 1; }
 .sync-warning { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-meter); }
 .desktop-stage { display: grid; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.settings-modal[hidden] { display: none; }
+.blueprint-hint { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--accent-border); background: var(--accent-wash); font-size: 12px; }
+.blueprint-hint > svg { color: var(--accent-ink); flex: none; }
+.blueprint-hint button:not(.icon-button) { color: var(--accent-ink); font-weight: 600; margin-left: auto; white-space: nowrap; }
+.draft-origin { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--quiet); }
+.draft-origin select { max-width: 140px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); padding: 3px 4px; font: inherit; }
 .workspace-layout { position: relative; display: grid; grid-template-columns: calc(var(--left-width, var(--sidebar-width)) * var(--left-open, 1)) minmax(0, 1fr) calc(var(--right-width, var(--inspector-width)) * var(--right-open, 1)); min-width: 0; min-height: 0; }
 .workspace-layout.sidebar-hidden { --left-open: 0; }
 .workspace-layout.inspector-hidden { --right-open: 0; }

@@ -82,7 +82,10 @@ try{
  const keylessRoot=path.join(root,'keyless'),keylessStore=new Store(keylessRoot);await keylessStore.init();const keylessSettings=new SettingsStore(keylessRoot,runtime,node,{protect:async s=>s,unprotect:async s=>s});await keylessSettings.init();keylessSettings.value={...p.settings.value};
  const keylessDsh=path.join(root,'keyless-native-dsh'),keylessDb=path.join(root,'keyless-native.sqlite');await cp(home,keylessDsh,{recursive:true});await copyFile(zdb,keylessDb);keylessSettings.value.history={autoImport:true,autoExport:true,importScope:'all',exportScope:'all',sources:{deepseek:keylessDsh,zcode:keylessDb}};
  const keylessController=new Controller(keylessStore,keylessSettings,()=>{}),keylessHistory=new HistoryService(keylessController),keylessSync=new HistorySync(keylessController,keylessHistory,()=>{},async()=>({}));await keylessSync.init();
- const keylessBefore=fixture.requests.length;const keylessStatus=await keylessSync.run(true);assert.deepEqual(keylessStatus.issues,[]);assert.equal(keylessStore.list().length,2);await keylessSync.run(true);assert.equal(fixture.requests.length,keylessBefore);
+ const keylessBefore=fixture.requests.length;await keylessSync.run(true);assert.equal(keylessStore.list().length,0,'legacy all is paused');
+ const keylessSource={harness:'deepseek' as const,location:keylessDsh};
+ await keylessSync.setImportSelection({source:keylessSource,sessionId:receipt.sessionId,enabled:true});
+ const keylessStatus=await keylessSync.run(true);assert.deepEqual(keylessStatus.issues,[]);assert.equal(keylessStore.list().length,1);await keylessSync.run(true);assert.equal(fixture.requests.length,keylessBefore);
  const peer=await profile('peer');peer.settings.value.history={autoImport:true,autoExport:true,importScope:'all',exportScope:'all',sources:{deepseek:keylessDsh,zcode:keylessDb}};await peer.sync.run(true);await keylessSync.run(true);await peer.sync.run(true);
  const peerCount=peer.store.list().length,keylessCount=keylessStore.list().length;await keylessSync.run(true);await peer.sync.run(true);assert.equal(peer.store.list().length,peerCount);assert.equal(keylessStore.list().length,keylessCount);assert.equal(fixture.requests.length,keylessBefore);await peer.sync.stop();await peer.controller.close();await keylessSync.stop();await keylessController.close();
  console.log('FOREIGN_PROFILE_MIRRORS_DO_NOT_ECHO_FOREVER_OK');
@@ -99,10 +102,12 @@ try{
  const recovered=new HistorySync(p.controller,p.history,()=>{},async()=>({}));await recovered.init();await recovered.run(true);assert.equal(p.store.list().length,1);
  await p.controller.selectReasoning(imported.id,'max');fixture.reply('本地新增 LOCAL-164');await p.controller.send(imported.id,'本地新增 LOCAL-164');await idle(p,imported.id);assert.equal(fixture.requests.at(-1)!.body.output_config.effort,'max');
  fixture.reply('独立端新增 REMOTE-275');await independent(home,receipt.sessionId,'独立端新增 REMOTE-275');await recovered.run(true);
- assert.equal(p.store.list().length,2,'两端更新应保留分支');assert(p.store.list().some(c=>c.title.includes('独立端分支')));
+ const conflict=recovered.conflicts()[0];assert(conflict,'两端更新应暂停并提示冲突');
+ assert(conflict.local.join(' ').includes('LOCAL-164'));assert(conflict.remote.join(' ').includes('REMOTE-275'));
+ await recovered.resolveConflict(conflict.id,'both');assert.equal(p.store.list().length,2,'选择保留两条分支');
  await recovered.run(true);assert.equal(p.store.list().length,2,'冲突处理不应反复复制分支');
  const source={harness:'deepseek' as const,location:home},fingerprint=(await p.history.inspect(source,receipt.sessionId)).fingerprint;
- p.settings.value.history={...p.settings.value.history!,autoImport:false,autoExport:false};fixture.reply('关闭同步后的本地消息');await p.controller.send(imported.id,'关闭自动同步');await idle(p,imported.id);await recovered.run(true);
+ p.settings.value.history={...p.settings.value.history!,autoImport:false,autoExport:false};fixture.reply('关闭同步后的本地消息');await p.controller.send(imported.id,'关闭自动同步');await idle(p,imported.id);await recovered.run();
  assert.equal((await p.history.inspect(source,receipt.sessionId)).fingerprint,fingerprint);
  console.log('CONFLICT_BRANCH_RESTART_AND_OFF_SWITCHES_OK');
  await p.controller.selectModel(imported.id,'glm-5.3');await assert.rejects(()=>p.controller.selectReasoning(imported.id,'off'),/没有经过核实/);
@@ -121,7 +126,7 @@ try{
  const unchanged=(await p.history.inspect(source,receipt.sessionId)).fingerprint;const waiting=await guarded.run(true);assert(waiting.issues.some(i=>i.includes('仍在运行')));assert.equal((await p.history.inspect(source,receipt.sessionId)).fingerprint,unchanged);
  console.log('CACHED_NATIVE_CLIENT_DEFERRED_OK');
  const expired=path.join(root,'old-project');await mkdir(expired);const old=await seed.controller.create(expired,'deepseek');fixture.reply('旧项目历史 OLD-HISTORY-386');await seed.controller.send(old.id,'旧项目历史 OLD-HISTORY-386');await idle(seed,old.id);const oldExport=await seed.history.export({conversationId:old.id,target:source});await rmdir(expired);
- const offline=new HistorySync(p.controller,p.history,()=>{},async()=>({deepseek:true,zcode:true}));await offline.init();const requestsBefore=fixture.requests.length;await offline.run(true);assert.equal(fixture.requests.length,requestsBefore);
+ const offline=new HistorySync(p.controller,p.history,()=>{},async()=>({deepseek:true,zcode:true}));await offline.init();await offline.setImportSelection({source,sessionId:oldExport.sessionId,enabled:true});const requestsBefore=fixture.requests.length;await offline.run(true);assert.equal(fixture.requests.length,requestsBefore);
  const missing=p.store.list().find(c=>c.importedFrom?.sessionId===oldExport.sessionId)!;assert(missing?.workspaceMissing);assert((await p.store.items(missing.id)).some(i=>i.text.includes('OLD-HISTORY-386')));
  const recoveredWorkspace=path.join(root,'recovered-project');await mkdir(recoveredWorkspace);
  const relocated=await p.controller.exclusive(missing.id,()=>p.history.import({source:{harness:'deepseek',location:path.join(p.controller.codec.nativeRoot(missing),'deepseek')},sessionId:missing.bindings.deepseek!.sessionId,workspace:recoveredWorkspace},missing));assert.equal(relocated.workspaceMissing,false);
@@ -129,7 +134,9 @@ try{
  const paused=await profile('paused-app');
  try{
   await mkdir(path.join(paused.settings.value.deepseek.home,'sessions'),{recursive:true});const holder=await paused.controller.create(workspace,'zcode');await paused.controller.initializeDatabase(holder);const pausedZ={harness:'zcode' as const,location:paused.controller.codec.database(holder)};paused.settings.value.history={autoImport:true,autoExport:true,importScope:'all',exportScope:'all',sources:{zcode:pausedZ.location}};
-  const interrupted=await paused.controller.create(workspace,'deepseek');fixture.hold(true);const beforePause=fixture.requests.length;await paused.controller.send(interrupted.id,'这轮将主动暂停 PAUSED-497');while(fixture.requests.length===beforePause)await new Promise(r=>setTimeout(r,50));await paused.controller.stop(interrupted.id);assert.equal(interrupted.state,'idle');fixture.hold(false);
+  const interrupted=await paused.controller.create(workspace,'deepseek',paused.history.defaults().deepseek);
+  await paused.sync.setExportSelection({kind:'conversation',id:interrupted.id},{deepseek:true,zcode:true});
+  fixture.hold(true);const beforePause=fixture.requests.length;await paused.controller.send(interrupted.id,'这轮将主动暂停 PAUSED-497');while(fixture.requests.length===beforePause)await new Promise(r=>setTimeout(r,50));await paused.controller.stop(interrupted.id);assert.equal(interrupted.state,'idle');fixture.hold(false);
   const firstPaused=await paused.sync.run(true);assert.deepEqual(firstPaused.issues,[]);const dsSource={harness:'deepseek' as const,location:paused.settings.value.deepseek.home};const dsId=(await paused.history.list(dsSource)).sessions[0].id,zId=(await paused.history.list(pausedZ)).sessions[0].id;
   fixture.reply('暂停后继续 PAUSE-RESUMED-508');await paused.controller.send(interrupted.id,'在暂停后继续');await idle(paused,interrupted.id);const resumed=await paused.sync.run(true);assert.deepEqual(resumed.issues,[]);assert.equal((await paused.history.list(dsSource)).sessions[0].id,dsId);assert.equal((await paused.history.list(pausedZ)).sessions[0].id,zId);
   console.log('PAUSE_AND_NEXT_ROUND_SYNC_SAME_NATIVE_IDS_OK');

@@ -80,7 +80,14 @@ export interface NativeBinding {
   seed?: { file: string; view: 'resume' | 'archive' };
 }
 export interface NativeHistorySource { harness: Harness; location: string; }
-export interface NativeHistory { id: string; title: string; workspace: string; createdAt: number; updatedAt: number; version?: string; busy?: boolean; sync?: { joined: boolean; allowed: boolean; session?: boolean; project?: boolean }; }
+export type BlueprintTarget = Harness | 'workbench';
+export interface BlueprintScope { source: NativeHistorySource; workspace: string; sessionId?: string; wholeHarness?: true; }
+export interface BlueprintRule { scope: BlueprintScope; target: BlueprintTarget; enabled: boolean; }
+export interface BlueprintChat { scope: BlueprintScope; title: string; updatedAt: number; appId?: string; }
+export interface BlueprintCatalog { source: NativeHistorySource; projects: { source?: NativeHistorySource; workspace: string; chats: BlueprintChat[] }[]; pending: BlueprintChat[]; warnings: string[]; }
+export interface BlueprintConflict { id: string; appId: string; source: NativeHistorySource; title: string; local: string[]; remote: string[]; }
+export interface BlueprintState { rules: BlueprintRule[]; conflicts: BlueprintConflict[]; onboarded: boolean; }
+export interface NativeHistory { id: string; title: string; workspace: string; createdAt: number; updatedAt: number; version?: string; busy?: boolean; provenance?: {profile:string;appId:string;revision:number;fingerprint?:string}; sync?: { joined: boolean; allowed: boolean; session?: boolean; project?: boolean }; }
 export interface NativeHistoryList { source: NativeHistorySource; sessions: NativeHistory[]; warnings: string[]; }
 export type HistoryExportScope = { kind: 'project'; workspace: string } | { kind: 'conversation'; id: string };
 export type HistoryExportRules = Partial<Record<Harness, boolean>>;
@@ -91,6 +98,7 @@ export interface HistoryExport { conversationId: string; target: NativeHistorySo
 export interface ExportReceipt { harness: Harness; sessionId: string; location: string; workspace: string; backup?: string; verified: boolean; reused?: true; }
 export interface Conversation {
   id: string; title: string; workspace: string; harness: Harness;
+  origin?: {source: NativeHistorySource; sessionId?: string; workspace?: string};
   createdAt: number; updatedAt: number; revision: number; state: RunState;
   bindings: Partial<Record<Harness, NativeBinding>>; canonicalPath?: string;
   modelId?: string; harnessMode?: 'auto' | 'manual';
@@ -108,7 +116,7 @@ export interface DisplayItem {
 }
 export interface Approval { id: string; conversationId: string; kind: 'permission' | 'question'; title: string; detail: string; raw: unknown; }
 export interface RuntimeHealth { harness: Harness; available: boolean; executable: string; detail: string; }
-export interface Bootstrap { conversations: Conversation[]; projects: string[]; settings: SettingsView; health: RuntimeHealth[]; dataDir: string; reasoning: ModelReasoning[]; historySync: HistorySyncStatus; startupRoute?: RuntimeSelection; }
+export interface Bootstrap { conversations: Conversation[]; projects: string[]; projectOrigins?: Record<string,Harness>; blueprintOnboarded?: boolean; settings: SettingsView; health: RuntimeHealth[]; dataDir: string; reasoning: ModelReasoning[]; historySync: HistorySyncStatus; startupRoute?: RuntimeSelection; }
 export type DesktopEvent =
   | { type: 'app-update'; status: AppUpdateStatus }
   | { type: 'conversation'; conversation: Conversation }
@@ -130,6 +138,12 @@ export interface GitChange { path: string; oldPath?: string; index: string; work
 export interface GitStatus { available: boolean; repository: boolean; branch: string; changes: GitChange[]; }
 export interface DiffPreview { path: string; parent: string; staged: string; unstaged: string; truncated: boolean; }
 export interface DesktopApi {
+  blueprint(): Promise<BlueprintState>;
+  blueprintCatalog(harness: Harness): Promise<BlueprintCatalog>;
+  blueprintRule(scope: BlueprintScope, target: BlueprintTarget, enabled: boolean | null): Promise<BlueprintState>;
+  blueprintConfirm(scopes: BlueprintScope[], classification: 'native'|'copy'): Promise<void>;
+  blueprintResolve(id: string, choice:'local'|'remote'|'both'): Promise<BlueprintState>;
+  blueprintDismiss(): Promise<void>;
   appUpdateStatus(): Promise<AppUpdateStatus>;
   checkAppUpdate(): Promise<AppUpdateStatus>;
   installAppUpdate(): Promise<void>;
@@ -152,11 +166,11 @@ export interface DesktopApi {
   chooseDatabase(): Promise<string | null>;
   bootstrap(): Promise<Bootstrap>;
   rememberRuntime(selection: RuntimeSelection): Promise<void>;
-  addProject(workspace: string): Promise<string>;
-  createProject(parent: string, name: string): Promise<string>;
+  addProject(workspace: string, originHarness?: Harness): Promise<string>;
+  createProject(parent: string, name: string, originHarness?: Harness): Promise<string>;
   accountUsage(harness: Harness, refresh?: boolean): Promise<AccountUsage>;
   tokenActivity(): Promise<TokenDay[]>;
-  createConversation(workspace: string, harness: Harness): Promise<Conversation>;
+  createConversation(workspace: string, harness: Harness, originHarness?: Harness): Promise<Conversation>;
   loadConversation(id: string): Promise<{ conversation: Conversation; items: DisplayItem[] }>;
   send(id: string, text: string): Promise<void>;
   stop(id: string): Promise<void>;

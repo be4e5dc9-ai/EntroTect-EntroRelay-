@@ -34,6 +34,8 @@ export class AgentClient {
   private readonly commandsBySession = new Map<string, HarnessCommand[]>();
   private readonly sessions = new Map<string, AgentSession>();
   private readonly running = new Set<string>();
+  private accountLoader?: () => Promise<void>;
+  private accountReady?: Promise<void>;
   private constructor(readonly harness: AgentHarness, readonly rpc: RpcProcess, readonly executable: string) {
     rpc.on('notification', (frame: AgentFrame) => {
       if (harness === 'codex' && frame.method === 'thread/closed') this.sessions.delete(frame.params?.threadId);
@@ -54,7 +56,8 @@ export class AgentClient {
     const rpc = new RpcProcess(config, cwd, env, acp, false);
     const client = new AgentClient(harness, rpc, config.executable);
     try {
-      const hello = await rpc.request('initialize', acp ? { protocolVersion: 1, clientInfo, clientCapabilities: {} } : { clientInfo }, openTimeout);
+      const hello = await rpc.request('initialize', acp ? { protocolVersion: 1, clientInfo, clientCapabilities: {} }
+        : { clientInfo, capabilities: { experimentalApi: true } }, openTimeout);
       if (acp) {
         if (hello?.protocolVersion !== 1) throw new Error('当前执行器使用不受支持的 ACP 协议版本');
         client.capabilities = hello.agentCapabilities ?? {};
@@ -71,9 +74,17 @@ export class AgentClient {
 
   close() { return this.rpc.close(); }
 
+  useAccount(loader: () => Promise<void>) { this.accountLoader = loader; }
+  async ensureAccount() {
+    if (!this.accountLoader) return;
+    this.accountReady ??= this.accountLoader().catch(error => { this.accountReady = undefined; throw error; });
+    await this.accountReady;
+  }
+
   get hasVerifiedCodexWriterLock() { return this.codexVersion === '0.167.0'; }
 
   async open(cwd: string, sessionId?: string, model?: string): Promise<AgentSession> {
+    await this.ensureAccount();
     const loaded = sessionId && this.sessions.get(sessionId);
     if (loaded) return loaded;
     const params = { cwd, ...(model ? { model } : {}) };
@@ -189,6 +200,7 @@ export class AgentClient {
 
   async modelCatalog() {
     if (this.harness !== 'codex') throw new Error('ACP 模型配置由具体会话提供');
+    await this.ensureAccount();
     const models: any[] = [];
     const visited = new Set<string>();
     let cursor: string | undefined;

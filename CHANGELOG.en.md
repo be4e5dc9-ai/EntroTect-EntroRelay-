@@ -2,6 +2,14 @@
 
 [简体中文](CHANGELOG.md) · English
 
+## 0.8.1-beta.1
+
+- Added the EntroRelay sync blueprint. Connect an entire Harness, a project, or a chat to the EntroTect workspace or a standalone Harness. Project and chat rules can override inherited connections.
+- Move sender nodes and open each node's own source card to its right. Keep multiple cards open and browse, search, or review origins in each one independently.
+- First launch offers an import entry point. Background sync follows enabled connections. Sync copies are identified by native session IDs, and older chats with uncertain origins can be reviewed by chat, project, or Harness.
+- Continue a linked chat from either endpoint. If both endpoints add new turns, compare the branches and choose which to keep. Repeated saves to the same standalone Codex profile reuse the destination thread.
+- Codex and Kimi Code can reuse standalone sign-in while keeping workspace chat history in separate runtime directories. A connection can publish those chats to the standalone client.
+
 ## 0.8.0-beta.2
 
 - Added an English interface for EntroTect and its EntroRelay workflows. Choose Follow system, Simplified Chinese, or English in Settings and connections → General → Interface language. The change takes effect when you save.

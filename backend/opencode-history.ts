@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { completedEntries, portableMessages, portableText, toolArguments, unpublishedEntries, type PortableEntry } from './portable-history';
+import { completedEntries, portableHistoryFingerprint, portableMessages, portableText, toolArguments, unpublishedEntries, type PortableEntry } from './portable-history';
 import type { DatabaseSync } from 'node:sqlite';
 import { sumReportedTokens, type NativeTokenReport } from './token-activity';
 
@@ -77,10 +77,22 @@ function messageRows(sessionID: string, cwd: string, entries: readonly PortableE
   });
 }
 
-export async function writeOpenCodeHistory(cli: NativeCli, cwd: string, title: string, entries: readonly PortableEntry[], model: OpenCodeModel) {
+export async function writeOpenCodeHistory(cli: NativeCli, cwd: string, title: string, entries: readonly PortableEntry[], model: OpenCodeModel, allocated?: (id: string) => Promise<void>, reservedId?:string) {
   if (!path.isAbsolute(cwd) || !entries.length) throw new Error('OpenCode 工作目录或上下文无效');
   const now = Date.now();
-  const sessionID = id('ses', now);
+  const sessionID = reservedId ?? id('ses', now);
+  if (!/^ses_[a-f0-9]+$/.test(sessionID)) throw new Error('OpenCode 会话 ID 无效');
+  if (reservedId) {
+    const previous = await readOpenCodeStorage(cli.env.OPENCODE_DB!, reservedId).catch(error => {
+      if (error.message==='OpenCode 原生会话不存在') return;
+      throw error;
+    });
+    if (previous) {
+      if (portableHistoryFingerprint(previous.history)!==portableHistoryFingerprint(entries)) throw new Error('未完成发布的 OpenCode 会话已有其他内容');
+      return reservedId;
+    }
+  }
+  await allocated?.(sessionID);
   const entriesToWrite = completedEntries(entries);
   const first = entriesToWrite[0];
   const synthetic = !!first && (!('role' in first) || first.role !== 'user');
@@ -140,6 +152,14 @@ export async function openCodePartCursor(database: string, sessionId: string) {
   } finally { db.close(); }
 }
 
+export async function openCodeCreationTimes(database: string) {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(database,{readOnly:true,timeout:3_000});
+  try {
+    return new Map(db.prepare('SELECT id, time_created FROM session').all().map(row=>[String(row.id),Number(row.time_created)]));
+  } finally { db.close(); }
+}
+
 export async function readOpenCodeStorage(database: string, sessionId: string) {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(database, { readOnly: true, timeout: 3_000 });
@@ -147,7 +167,7 @@ export async function readOpenCodeStorage(database: string, sessionId: string) {
   finally { db.close(); }
 }
 
-export async function appendOpenCodeHistory(database: string, cwd: string, sessionId: string, expected: string, current: readonly PortableEntry[], externalOpen = false) {
+export async function appendOpenCodeHistory(database: string, cwd: string, sessionId: string, expected: string, current: readonly PortableEntry[], externalOpen = false, replace = false) {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(database, { timeout: 3_000 });
   try {
@@ -157,11 +177,16 @@ export async function appendOpenCodeHistory(database: string, cwd: string, sessi
     if (externalOpen && native.session.version !== verifiedOpenCodeStorage) throw new Error('独立 OpenCode 正在运行，退出后将写回此版本的会话');
     if (externalOpen && native.openTurn) throw new Error('独立 OpenCode 的此会话正在运行，已暂缓写回');
     if (path.resolve(String(native.session.directory)).toLowerCase() !== path.resolve(cwd).toLowerCase()) throw new Error('OpenCode 会话已移动到其他项目');
-    const delta = unpublishedEntries(native.history, current);
+    const delta = replace ? current : unpublishedEntries(native.history, current);
     if (delta.length) {
       const lastUser = native.records.filter(entry => entry.info.role === 'user').at(-1)?.info;
       const model = lastUser?.model;
       if (!model?.providerID || !model?.modelID) throw new Error('OpenCode 原生会话没有可复用的模型配置');
+      if (replace) {
+        if (externalOpen) throw new Error('请先退出独立 OpenCode 再解决分歧');
+        db.prepare('DELETE FROM part WHERE session_id = ?').run(sessionId);
+        db.prepare('DELETE FROM message WHERE session_id = ?').run(sessionId);
+      }
       const now = Date.now();
       const insertMessage = db.prepare('INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)');
       const insertPart = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)');

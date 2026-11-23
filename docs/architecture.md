@@ -55,17 +55,18 @@ records, and use fresh native bindings when refreshing an existing application
 conversation. Canonical context is produced from the copied
 native history, so it corresponds to the imported snapshot. Exports acquire the
 conversation operation lock and stage any conversion before changing vendor stores.
-Converted sessions receive fresh native IDs. Codex imports from its active profile
-can retain the original thread ID, and manual continuation can reuse that thread
-when the target already contains the current revision.
+The first publication allocates a native ID in the destination profile. Manual
+saves and automatic writes reuse that mapping, including after a restart.
+Codex and Kimi keep runtime sessions in private directories when using the
+standalone account. Creating a local chat records its declared origin.
 
-HistorySync runs after startup, at stopped turn boundaries, on a 15-second timer,
-and on graceful shutdown. Both directions default to enabled. The durable link
-index records native identity, last synchronized application revision and native
-fingerprint. Own mirrors are recognized by provenance in a DSH sidecar or a ZCode
-session_entry committed with the copied rows. Conflicting local/remote advances
-fork instead of discarding either transcript. User actions wait for an active
-sync operation on that conversation rather than failing with a busy error.
+HistorySync checks explicit blueprint rules on startup, at stopped turn boundaries
+and every 15 seconds. A new profile has no rules. Expanding a sender reads its
+catalog. Connecting a project subscribes to its native chats, including future
+chats. A chat can override individual project targets. The connection index
+records native identities, application revisions and native fingerprints. If
+linked endpoints diverge, the worker saves both transcripts and pauses the
+affected connection until the user chooses a branch or keeps both.
 
 An external native desktop process can retain decoded histories while idle.
 Automatic write-back defers while that client is running, rechecking immediately
@@ -76,9 +77,9 @@ mapping, under the application profile. Native account configuration is unchange
 Automatic synchronization does not resume an agent: it copies persisted state,
 initializing an empty ZCode schema without model credentials when needed. This
 also keeps user plugins and retained goals from being started merely by syncing.
-Mirrors owned by another application data profile are imported but are not
-re-exported until the user continues them locally, preventing cross-profile echo
-loops. Unpublished export staging directories are removed within a verified
+Native provenance and the mapping index identify published copies. Only the
+original chat appears in the sender tree. Ambiguous legacy histories await
+confirmation before participating in a project rule. Unpublished export staging directories are removed within a verified
 application-data boundary; published conversation directories are retained.
 
 Reasoning choices are declared separately from model execution. The UI lists only

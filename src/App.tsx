@@ -1,8 +1,8 @@
 import { useI18n } from './i18n';
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { Activity, ArrowUp, ArrowUpRight, Check, CheckCheck, ChevronDown, ChevronRight, Download, FileJson2, FolderOpen, FolderPlus, History, House, LoaderCircle, Ellipsis, PanelLeftOpen, PanelLeftClose, PanelRightOpen, PanelRightClose, RefreshCw, Settings2, ShieldCheck, Square, SquarePen, Terminal, X } from 'lucide-react';
+import { Activity, ArrowUp, Check, CheckCheck, ChevronDown, ChevronRight, Download, FileJson2, FolderOpen, FolderPlus, History, House, LoaderCircle, Ellipsis, PanelLeftOpen, PanelLeftClose, PanelRightOpen, PanelRightClose, RefreshCw, Settings2, ShieldCheck, Square, SquarePen, Terminal, X } from 'lucide-react';
 import { accentColors, defaultAccent, type AccentColor } from '../shared/appearance';
-import { activeRunStates, agentHarnesses, harnesses, type AgentHarness, type AppUpdateStatus, type Approval, type Bootstrap, type ContextDetails, type Conversation, type DisplayItem, type Harness, type HistoryExportScope, type NativeModelCatalog, type Theme } from '../shared/types';
+import { activeRunStates, agentHarnesses, harnesses, type AgentHarness, type AppUpdateStatus, type Approval, type Bootstrap, type ContextDetails, type Conversation, type DisplayItem, type Harness, type NativeModelCatalog, type Theme } from '../shared/types';
 import { catalogModel, catalogModelId, connectionFor, defaultModel, harnessNames as names, isAgentHarness, modelHarness, nativeModel } from '../shared/harnesses';
 import { projectKey, projectName } from '../shared/project-path';
 import type { PreviewLink } from '../shared/preview-link';
@@ -11,8 +11,7 @@ import { ChatMarkdown, chatPreviewLink } from './ChatMarkdown';
 import type { SettingsTab } from './SettingsDialog';
 import {WindowControls} from './WindowControls';
 import {ModelIcon,HarnessIcon} from './BrandIcon';
-import {HistoryDialog} from './HistoryDialog';
-import {HistoryExportDialog} from './HistoryExportDialog';
+import type { BlueprintFocus } from './BlueprintPage';
 import {modelReasoning,reasoningKey} from '../shared/reasoning';
 import { CommandInput } from './CommandInput';
 import { ProjectList } from './ProjectList';
@@ -23,6 +22,7 @@ import { AppUpdateLog, AppUpdateReminder } from './AppUpdateNotice';
 import { WorkspaceLayout } from './WorkspaceLayout';
 
 const SettingsDialog=lazy(()=>import('./SettingsDialog').then(module=>({default:module.SettingsDialog})));
+const BlueprintPage=lazy(()=>import('./BlueprintPage').then(module=>({default:module.BlueprintPage})));
 const ProjectSidebar=lazy(()=>import('./ProjectSidebar').then(module=>({default:module.ProjectSidebar})));
 const labels={idle:'就绪',starting:'正在启动',running:'正在工作',waiting:'等待你的回复',stopping:'正在暂停',syncing:'正在保存上下文',error:'需要处理'};
 function displayTitle(t: import('./i18n').Translate, chat?: Conversation) {
@@ -46,9 +46,11 @@ export function App(){
  const [themePreview,setThemePreview]=useState<Theme>(),[accentPreview,setAccentPreview]=useState<AccentColor>(),[projectOpen,setProjectOpen]=useState(false);
  const [appUpdate,setAppUpdate]=useState<AppUpdateStatus>(),[updateLogOpen,setUpdateLogOpen]=useState(false);
  const [sessionMenu,setSessionMenu]=useState(false),[logsOpen,setLogsOpen]=useState(false);
- const [historyOpen,setHistoryOpen]=useState<'import'|'export'|null>(null);
- const [historyScope,setHistoryScope]=useState<HistoryExportScope|null>(null);
- const [historyExportId,setHistoryExportId]=useState<string>(),[draftReasoning,setDraftReasoning]=useState<Record<string,string>>({});
+ const [blueprint,setBlueprint]=useState<BlueprintFocus|null>(null);
+ const [showHistoryHint,setShowHistoryHint]=useState(false);
+ const hintInitialized=useRef(false);
+ const [draftOrigin,setDraftOrigin]=useState<Harness>();
+ const [draftReasoning,setDraftReasoning]=useState<Record<string,string>>({});
  const contentVersion=useRef(0);
  const queuedItems=useRef(new Map<string, DisplayItem>());
  const itemFrame=useRef(0);
@@ -61,6 +63,8 @@ export function App(){
  const harness=c?.harness||(override==='auto'?preferred(model):override);
  const runtime=boot?.health.find(entry=>entry.harness===harness);
  const directory=c?.workspace||workspace;
+ const projectOrigin=boot?.projectOrigins?.[projectKey(directory)];
+ const origin=draftOrigin??projectOrigin??harness;
  const sidebarWorkspace=c?.workspaceMissing?'':directory;
  const sidebarProject=projectKey(sidebarWorkspace);
  const catalogScope = JSON.stringify([projectKey(directory), boot?.settings.agents]);
@@ -187,6 +191,14 @@ export function App(){
  },[]);
  const runtimeReady=!!boot;
  useEffect(()=>{
+  if(!boot||hintInitialized.current)return;
+  hintInitialized.current=true;
+  if(boot.blueprintOnboarded===false){
+   setShowHistoryHint(true);
+   void api!.blueprintDismiss().catch(e=>setError(message(e)));
+  }
+ },[boot]);
+ useEffect(()=>{
   if(runtimeReady&&(!id||c))void api?.rememberRuntime({harness,conversationId:id??undefined}).catch(()=>{});
  },[runtimeReady,id,harness]);
  useEffect(()=>{
@@ -197,14 +209,14 @@ export function App(){
  const newChat=useCallback((project=directory)=>{
   if(pending)return;
   contentVersion.current++;idRef.current=null;setId(null);setWorkspace(project);
-  replaceItems([]);setDraft('');setError('');setLogs([]);setOverride('auto');
+  replaceItems([]);setDraft('');setDraftOrigin(undefined);setError('');setLogs([]);setOverride('auto');
   setSidebarLink(undefined);
   setSessionMenu(false);setContextOpen(false);setLogsOpen(false);
  },[pending,directory]);
  useEffect(()=>{
-  const key=(e:KeyboardEvent)=>{if(e.ctrlKey&&e.key.toLowerCase()==='n'&&!settings&&!projectOpen&&!historyOpen&&!historyScope&&!contextOpen&&!logsOpen&&!updateLogOpen&&!approvals.length){e.preventDefault();newChat();}};
+  const key=(e:KeyboardEvent)=>{if(e.ctrlKey&&e.key.toLowerCase()==='n'&&!settings&&!projectOpen&&!blueprint&&!contextOpen&&!logsOpen&&!updateLogOpen&&!approvals.length){e.preventDefault();newChat();}};
   window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
- },[directory,pending,settings,projectOpen,historyOpen,historyScope,contextOpen,logsOpen,updateLogOpen,approvals.length]);
+ },[directory,pending,settings,projectOpen,blueprint,contextOpen,logsOpen,updateLogOpen,approvals.length]);
  const load=useCallback(async(chat:Conversation)=>{
   if(!api||pending)return;
   contentVersion.current++;setPending(true);setError('');
@@ -216,7 +228,16 @@ export function App(){
  },[pending,directory]);
  const addProject=useCallback(()=>setProjectOpen(true),[]);
  const selectProject=useCallback((project:string)=>{if(projectKey(project)!==projectKey(directory)||c?.workspaceMissing)newChat(project);},[directory,c?.workspaceMissing,newChat]);
- const syncProject=useCallback((workspace:string)=>setHistoryScope({kind:'project',workspace}),[]);
+ function openBlueprint(focus:BlueprintFocus={}){
+  setShowHistoryHint(false);setSessionMenu(false);setBlueprint(focus);
+ }
+ function chatBlueprint(chat:Conversation){
+  openBlueprint({harness:chat.origin?.source.harness??chat.importedFrom?.harness??chat.harness,workspace:chat.workspace,appId:chat.id});
+ }
+ function syncProject(workspace:string){
+  const member=chats.find(chat=>projectKey(chat.workspace)===projectKey(workspace));
+  openBlueprint({workspace,harness:boot?.projectOrigins?.[projectKey(workspace)]??member?.origin?.source.harness??member?.importedFrom?.harness??member?.harness??harness});
+ }
  async function route(nextModel:string,nextMode:'auto'|Harness){if(busy||pending)return;setPending(true);setError('');try{if(c){const changed=await api!.selectModel(c.id,nextModel,nextMode==='auto'?undefined:nextMode);setChats(old=>old.map(v=>v.id===changed.id?changed:v));const loaded=await api!.loadConversation(c.id);replaceItems(loaded.items);}setModel(nextModel);setOverride(nextMode);}catch(e){setError(message(e));}finally{setPending(false);}}
  async function reasoning(level:string){if(busy||pending)return;setPending(true);setError('');try{if(c){const changed=await api!.selectReasoning(c.id,level||undefined);setChats(old=>old.map(v=>v.id===changed.id?changed:v));}else setDraftReasoning(old=>({...old,[reasoningKey(selected,harness)]:level}));}catch(e){setError(message(e));}finally{setPending(false);}}
  async function send(){
@@ -227,7 +248,7 @@ export function App(){
   setPending(true);setError('');
   try{
    if(!chat){
-    chat=await api.createConversation(workspace,harness);
+    chat=await api.createConversation(workspace,harness,origin);
     idRef.current=chat.id;setId(chat.id);setChats(old=>[chat!,...old]);
     await api.selectModel(chat.id,model,override==='auto'?undefined:override);
     if(chosenReasoning)await api.selectReasoning(chat.id,chosenReasoning);
@@ -239,29 +260,26 @@ export function App(){
    if(!chat||idRef.current===chat.id){setDraft(old=>old||text);setError(message(e));}
   }finally{setPending(false);}
  }
- function rememberProject(project:string){
-  setBoot(old=>old&&!old.projects.some(value=>projectKey(value)===projectKey(project))?{...old,projects:[project,...old.projects]}:old);
+ function rememberProject(project:string,origin:Harness){
+  setBoot(old=>old?{...old,projects:old.projects.some(value=>projectKey(value)===projectKey(project))?old.projects:[project,...old.projects],
+   projectOrigins:{...old.projectOrigins,[projectKey(project)]:origin}}:old);
  }
  function closeSettings(){setSettings(null);setThemePreview(undefined);setAccentPreview(undefined);}
  async function choose(){
   if(!api||pending||busy)return;
+  if(!c){setProjectOpen(true);return;}
   setPending(true);setError('');
   try{
    const value=await api.chooseDirectory();
    if(!value)return;
-   if(c){
-    if(!c.workspaceMissing&&projectKey(c.workspace)===projectKey(value))return;
-    const changed=await api.relocateConversation(c.id,value);
-    setChats(old=>old.map(v=>v.id===changed.id?changed:v));
-   }else{
-    const project=await api.addProject(value);
-    rememberProject(project);setWorkspace(project);
-   }
+   if(!c.workspaceMissing&&projectKey(c.workspace)===projectKey(value))return;
+   const changed=await api.relocateConversation(c.id,value);
+   setChats(old=>old.map(v=>v.id===changed.id?changed:v));
   }catch(e){setError(message(e));}finally{setPending(false);}
  }
  const approval=approvals.find(a=>a.conversationId===id);
  useEffect(()=>{const close=(e:PointerEvent)=>{if(!(e.target as HTMLElement).closest('.session-menu-wrap'))setSessionMenu(false);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){setSessionMenu(false);setLogsOpen(false);}};window.addEventListener('pointerdown',close);window.addEventListener('keydown',key);return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',key);};},[]);
- const dialogOpen=!!(projectOpen||historyOpen||historyScope||contextOpen||logsOpen||approval);
+ const dialogOpen=!!(projectOpen||contextOpen||logsOpen||approval);
  return <div className="app">
   <div className="titlebar" data-tauri-drag-region>
    <div className="brand" data-tauri-drag-region><span className="brand-icon" data-tauri-drag-region><Logo/></span><strong data-tauri-drag-region>EntroTect</strong></div>
@@ -269,20 +287,20 @@ export function App(){
   </div>
   <div className="desktop-shell">
    <nav className="app-rail" aria-label={t("桌面导航")} inert={dialogOpen}>
-    <button className={`rail-button ${settings?'':'selected'}`} title={t("工作区")} aria-current={settings?undefined:'page'} onClick={()=>{closeSettings();setSidebar(true);}}><House size={19}/></button>
-    <button className="rail-button" title={t("新建或打开项目")} disabled={!boot||pending||!!settings} onClick={()=>setProjectOpen(true)}><FolderPlus size={19}/></button>
-    <button className="rail-button" title={t("导入历史对话")} disabled={!boot||pending||!!settings} onClick={()=>setHistoryOpen('import')}><History size={19}/></button>
+    <button className={`rail-button ${!settings&&!blueprint?'selected':''}`} title={t("工作区")} aria-current={settings||blueprint?undefined:'page'} onClick={()=>{closeSettings();setBlueprint(null);setSidebar(true);}}><House size={19}/></button>
+    <button className="rail-button" title={t("新建或打开项目")} disabled={!boot||pending||!!settings||!!blueprint} onClick={()=>setProjectOpen(true)}><FolderPlus size={19}/></button>
+    <button className={`rail-button ${blueprint?'selected':''}`} aria-current={blueprint?'page':undefined} title={t("导入历史对话")} disabled={!boot||pending} onClick={()=>openBlueprint()}><History size={19}/></button>
     <div className="rail-spacer"/>
-    {(!sidebar||settings)&&<AppUpdateReminder update={appUpdate} compact onOpen={()=>setUpdateLogOpen(true)}/>}
-    <button className={`rail-button ${settings?'selected':''}`} title={t("设置与连接")} aria-current={settings?'page':undefined} disabled={!boot||!!settings} onClick={()=>setSettings('general')}>
+    {(!sidebar||settings||blueprint)&&<AppUpdateReminder update={appUpdate} compact onOpen={()=>setUpdateLogOpen(true)}/>}
+    <button className={`rail-button ${settings&&!blueprint?'selected':''}`} title={t("设置与连接")} aria-current={settings&&!blueprint?'page':undefined} disabled={!boot||!!settings&&!blueprint} onClick={()=>{setBlueprint(null);setSettings('general');}}>
      <Settings2 size={19}/>{!!boot?.historySync.issues.length&&<span className="sync-warning" title={t("{0} 项暂未同步", boot.historySync.issues.length)}/>}
     </button>
    </nav>
    <div className="desktop-stage">
-    <WorkspaceLayout leftOpen={sidebar} rightOpen={!!inspector} hidden={!!settings} inactive={dialogOpen||updateLogOpen}
+    <WorkspaceLayout leftOpen={sidebar} rightOpen={!!inspector} hidden={!!settings||!!blueprint} inactive={dialogOpen||updateLogOpen||!!blueprint}
      right={inspector!==null&&<Suspense fallback={<aside className="project-sidebar"><div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>{t("正在打开项目侧栏…")}</div></aside>}>
        <ProjectSidebar key={sidebarProject} workspace={sidebarWorkspace} revision={c?.lastSyncAt}
-        active={!!inspector&&!settings&&!dialogOpen&&!updateLogOpen} onChoose={()=>void choose()} canChoose={!busy&&!pending}
+        active={!!inspector&&!settings&&!blueprint&&!dialogOpen&&!updateLogOpen} onChoose={()=>void choose()} canChoose={!busy&&!pending}
         link={sidebarLink?.project===sidebarProject?sidebarLink.target:undefined}/>
      </Suspense>}
      left={
@@ -308,6 +326,12 @@ export function App(){
         <ChevronRight size={13}/><strong title={displayTitle(t,c)}>{displayTitle(t,c)}</strong>
        </div>
        <div className="header-actions">
+        {!c&&<label className="draft-origin">{t("原生归属")}
+         <select aria-label={t("对话原生 Harness")} disabled={pending} value={draftOrigin??''} onChange={e=>setDraftOrigin(e.target.value as Harness||undefined)}>
+          <option value="">{projectOrigin?t("项目 · {0}",names[projectOrigin]):t("当前 · {0}",names[harness])}</option>
+          {harnesses.map(h=><option key={h} value={h}>{names[h]}</option>)}
+         </select>
+        </label>}
         <button type="button" className="active-harness" aria-label={t("配置 {0}", names[harness])}
          title={runtime?.available===false?t(runtime.detail):t("配置 {0}", names[harness])} disabled={!boot||pending} onClick={()=>setSettings(harness)}>
          <HarnessIcon h={harness}/><span>{names[harness]}</span>{runtime?.available===false&&<i className="harness-attention" aria-hidden="true"/>}
@@ -315,8 +339,7 @@ export function App(){
         <div className="session-menu-wrap">
          <button className="icon-button" title={t("会话菜单")} aria-expanded={sessionMenu} disabled={!c} onClick={()=>setSessionMenu(!sessionMenu)}><Ellipsis size={19}/></button>
          <div className="popover session-menu" role="menu" inert={!sessionMenu}>
-          <button role="menuitem" disabled={pending||!c} onClick={()=>{if(c)setHistoryScope({kind:'conversation',id:c.id});setSessionMenu(false);}}><RefreshCw size={14}/>{t("设置对话同步")}</button>
-          <button role="menuitem" disabled={busy||pending||!c?.revision} onClick={()=>{setHistoryExportId(id||undefined);setHistoryOpen('export');setSessionMenu(false);}}><ArrowUpRight size={14}/>{t("在独立 Harness 中继续")}</button>
+          <button role="menuitem" disabled={pending||!c} onClick={()=>{if(c)chatBlueprint(c);}}><RefreshCw size={14}/>{t("设置对话同步")}</button>
           <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setContextOpen(true);setSessionMenu(false);}}><FileJson2 size={14}/>{t("查看统一上下文")}</button>
           <button role="menuitem" disabled={!c?.canonicalPath||busy||pending} onClick={()=>{setSessionMenu(false);void api?.exportContext(id!).catch(e=>setError(message(e)));}}><Download size={14}/>{t("导出上下文")}</button>
           <button role="menuitem" onClick={()=>{setLogsOpen(true);setSessionMenu(false);}}><Terminal size={14}/>{t("执行器日志")}</button>
@@ -328,6 +351,10 @@ export function App(){
         </button>
        </div>
       </header>
+      {showHistoryHint&&<div className="blueprint-hint" role="region" aria-label={t("选择历史对话")}>
+       <History size={16}/><span>{t("可以选择本机已有的项目和对话加入工作台。")}</span>
+       <button onClick={()=>openBlueprint()}>{t("前往导入历史对话")}</button><button className="icon-button" title={t("跳过")} onClick={()=>setShowHistoryHint(false)}><X size={14}/></button>
+      </div>}
       <div className="chat-scroll" onClick={openChatLink} onAuxClick={openChatLink}
        onScroll={event=>{const area=event.currentTarget;follow.current=area.scrollHeight-area.scrollTop-area.clientHeight<130;}}>
        {!items.length?<div className="welcome">
@@ -389,19 +416,20 @@ export function App(){
       </div>
      </main>
     </WorkspaceLayout>
+    {blueprint&&<Suspense fallback={<div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>{t("正在打开同步蓝图…")}</div>}>
+     <BlueprintPage focus={blueprint} onBack={()=>setBlueprint(null)} returnToSettings={!!settings}/>
+    </Suspense>}
     {settings&&boot&&<Suspense fallback={<div className="project-opening" role="status"><LoaderCircle size={14} className="spin"/>{t("正在打开设置…")}</div>}>
-     <SettingsDialog settings={boot.settings} conversations={chats} currentId={id||undefined} initialTab={settings} currentHarness={harness} usage={usage}
+     <SettingsDialog hidden={!!blueprint} settings={boot.settings} conversations={chats} currentId={id||undefined} initialTab={settings} currentHarness={harness} usage={usage}
      onThemePreview={setThemePreview} onAccentPreview={setAccentPreview} onClose={closeSettings} onSaved={refresh}
      appUpdate={appUpdate} onShowUpdateLog={()=>setUpdateLogOpen(true)}
-     onImport={()=>{closeSettings();setHistoryOpen('import');}}
-     onExport={exportId=>{closeSettings();setHistoryExportId(exportId);setHistoryOpen('export');}}/>
+     onImport={()=>openBlueprint()}
+     onExport={exportId=>{const chat=chats.find(v=>v.id===exportId);if(chat)chatBlueprint(chat);}}/>
     </Suspense>}
    </div>
   </div>
   {updateLogOpen&&<AppUpdateLog update={appUpdate} onClose={()=>setUpdateLogOpen(false)}/>}
-  {projectOpen&&<ProjectDialog onClose={()=>setProjectOpen(false)} onProject={project=>{rememberProject(project);newChat(project);setSidebar(true);setProjectOpen(false);}}/>}
-  {historyOpen&&<HistoryDialog conversation={historyOpen==='export'?chats.find(v=>v.id===(historyExportId||id)):undefined} onClose={()=>setHistoryOpen(null)} onImported={chat=>{setHistoryOpen(null);void refresh().then(()=>load(chat));}}/>}
-  {historyScope&&<HistoryExportDialog scope={historyScope} title={historyScope.kind==='project'?historyScope.workspace:chats.find(chat=>chat.id===historyScope.id)?.title??t("对话")} onClose={()=>setHistoryScope(null)}/>}
+  {projectOpen&&<ProjectDialog defaultOrigin={projectOrigin??harness} origins={boot?.projectOrigins} onClose={()=>setProjectOpen(false)} onProject={(project,selectedOrigin)=>{rememberProject(project,selectedOrigin);newChat(project);setSidebar(true);setProjectOpen(false);}}/>}
   {contextOpen&&c&&<ContextDialog key={c.id} id={c.id} revision={c.revision} onClose={()=>setContextOpen(false)}/>}
   {logsOpen&&<div className="modal-backdrop" onClick={()=>setLogsOpen(false)}><section className="context-modal logs-modal" role="dialog" aria-label={t("执行器日志")} onClick={e=>e.stopPropagation()}><header><div><Terminal size={18}/><strong>{t("执行器日志")}</strong></div><button className="icon-button" title={t("关闭日志")} onClick={()=>setLogsOpen(false)}><X size={18}/></button></header><pre>{logs.length?logs.join('\n'):t("当前会话暂无诊断日志。")}</pre></section></div>}
   {approval&&<div className="modal-backdrop"><section className="approval-modal"><ShieldCheck size={28}/><h2>{t(approval.title)}</h2><pre>{t(approval.detail)}</pre>{approval.kind==='question'&&<textarea placeholder={t("输入你的回答")} value={answer} onChange={e=>setAnswer(e.target.value)}/>}<footer><button className="secondary-button" onClick={()=>void api?.answerApproval(approval.id,false).catch(e=>setError(message(e)))}>{t("拒绝 / 取消")}</button><button className="primary-button" onClick={()=>void api?.answerApproval(approval.id,true,answer).then(()=>setAnswer('')).catch(e=>setError(message(e)))}>{approval.kind==='question'?t("提交回答"):t("仅允许本次")}</button></footer></section></div>}

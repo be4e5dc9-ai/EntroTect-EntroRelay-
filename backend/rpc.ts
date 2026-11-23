@@ -12,6 +12,7 @@ export class RpcProcess extends EventEmitter {
   readonly child: ChildProcessWithoutNullStreams;
   readonly stderr: string[] = [];
   private pending = new Map<string, Pending>();
+  private incoming = new Map<string, (params: any) => Promise<unknown>>();
   private sequence = 0;
   exited = false;
   private failed = false;
@@ -36,7 +37,15 @@ export class RpcProcess extends EventEmitter {
         const frame = JSON.parse(line);
         if (frame.id !== undefined && !frame.method) {
           this.resolveReply(frame);
-        } else if (frame.method && frame.id !== undefined) this.emit('request', frame);
+        } else if (frame.method && frame.id !== undefined) {
+          const handler = this.incoming.get(frame.method);
+          if (!handler) this.emit('request', frame);
+          else void handler(frame.params).then(result => {
+            if (this.available) this.respond(frame.id, result);
+          }, () => {
+            if (this.available) this.rejectRequest(frame.id, '原生账号暂时无法刷新，请检查独立端登录状态');
+          });
+        }
         else if (frame.method) this.emit('notification', frame);
         else if (frame.type) this.emit('frame', frame);
         else this.emit('diagnostic', '未识别的协议帧');
@@ -92,6 +101,7 @@ export class RpcProcess extends EventEmitter {
     });
   }
   respond(id: string | number, result: unknown) { this.write({ ...(this.jsonrpc ? { jsonrpc: '2.0' } : {}), id, result }); }
+  handleRequest(method: string, handler: (params: any) => Promise<unknown>) { this.incoming.set(method, handler); }
   rejectRequest(id: string | number, message: string) { this.write({ ...(this.jsonrpc ? { jsonrpc: '2.0' } : {}), id, error: { code: -32601, message } }); }
   close() {
     if (!this.closing) {

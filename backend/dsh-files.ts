@@ -10,12 +10,42 @@ export function dshProjectKey(cwd: string) {
   return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`;
 }
 import { createReadStream } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, readdir, rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { DatabaseSync } from 'node:sqlite';
 import { createZstdDecompress, zstdDecompressSync } from 'node:zlib';
 
 const logNames = ['session.v4.jsonl.zstd', 'session.v4.jsonl', 'session.v3.jsonl.zstd', 'session.v3.jsonl', 'session.jsonl.zstd', 'session.jsonl'];
+
+export async function lockDeepSeekRegistry(registry: string) {
+  const marker = `${registry}.entrotect.lock`;
+  const db = new DatabaseSync(`${marker}.sqlite`, { timeout: 0 });
+  const occupied = () => Error('另一次导出正在更新 DeepSeek 项目索引，请稍后重试');
+  try {
+    try { db.exec('BEGIN IMMEDIATE'); }
+    catch (error) {
+      if ((error as {errcode?: number}).errcode === 5) throw occupied();
+      throw error;
+    }
+
+    // An atomic mkdir excludes legacy writers and distinguishes this marker
+    // from their lock file. Only the SQLite lock holder can reuse the directory.
+    try { await mkdir(marker); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!(await lstat(marker)).isDirectory() || (await readdir(marker)).length) throw occupied();
+    }
+
+    return async () => {
+      try { await rmdir(marker); }
+      finally { db.close(); }
+    };
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
 
 export async function deepSeekLog(directory: string) {
   for (const name of logNames) {

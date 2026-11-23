@@ -29,6 +29,12 @@ function translateDiagnostic(source: string, depth = 0): string {
     return format(target, values);
   }
   // History warnings prefix the error with a session, file, or Harness name.
+  const scopeEnd = source.lastIndexOf(' · ');
+  if (scopeEnd >= 0) {
+    const detail = source.slice(scopeEnd + 3);
+    const translated = translateDiagnostic(detail, depth + 1);
+    if (translated !== detail) return source.slice(0, scopeEnd + 3) + translated;
+  }
   const separator = source.indexOf('：');
   if (separator > 0) {
     const detail = source.slice(separator + 1);

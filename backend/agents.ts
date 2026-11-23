@@ -4,15 +4,16 @@ import path from 'node:path';
 import { connectionFor, harnessNames, nativeModel, supportsIsolatedLogin } from '../shared/harnesses';
 import type { AgentHarness, Conversation, ModelReasoning, NativeBinding, NativeHistory, NativeModelCatalog, Settings } from '../shared/types';
 import { AgentClient } from './agent-client';
-import { publishCodexHistory, readCodexHistory, writeCodexHistory } from './codex-history';
-import { appendKimiHistory, kimiHistoryVersion, readKimiCheckpoint, readKimiHistory, writeKimiHistory, type KimiCheckpoint } from './kimi-history';
-import { appendOpenCodeHistory, openCodePartCursor, readOpenCodeStorage, writeOpenCodeHistory } from './opencode-history';
+import { replaceCodexHistory, publishCodexHistory, readCodexHistory, writeCodexHistory } from './codex-history';
+import { appendKimiHistory, kimiHistoryMetadata, readKimiCheckpoint, readKimiHistory, writeKimiHistory, type KimiCheckpoint } from './kimi-history';
+import { appendOpenCodeHistory, openCodeCreationTimes, openCodePartCursor, readOpenCodeStorage, writeOpenCodeHistory } from './opencode-history';
 import type { NativeTokenReport } from './token-activity';
 import { kimiNativeUsage } from './kimi-usage';
 import { bridgeEntries, codexHistoryItems, completedEntries, contextSuffix, messagesToBridge, nativeContentFingerprint, portableHistoryFingerprint, unpublishedEntries, type PortableEntry } from './portable-history';
 import { defaultAgentConnection, type SettingsStore } from './settings';
 import { projectKey } from '../shared/project-path';
 import type { NativeCommitState } from './history';
+import { cachedCodexAccount, codexAccess, codexCredentialStore, prepareSharedHome, sharedRuntimeHome, type CodexAccount } from './native-account';
 
 async function knownCodexWriters(client: AgentClient, activity: NativeCommitState) {
   const writers = activity.codexWriters;
@@ -27,22 +28,26 @@ export class Agents {
   private catalogSettings?: Settings;
   private catalogs = new Map<string, { expires: number; value: Promise<NativeModelCatalog> }>();
   private codexStarting = new Map<string, Promise<AgentClient>>();
+  private accountRefreshes = new Map<string, Promise<CodexAccount | undefined>>();
   constructor(readonly settings: SettingsStore) {}
 
   config(harness: AgentHarness) { return connectionFor(this.settings.value, harness) ?? defaultAgentConnection(harness); }
 
   location(harness: AgentHarness) {
     const config = this.config(harness);
-    if (config.authMode === 'native' && config.isolatedNative && supportsIsolatedLogin(harness)) {
-      return path.join(this.settings.root, 'agents', `${harness}-account`);
+    if (config.authMode === 'native' && (harness === 'codex' || harness === 'kimi')) {
+      return config.isolatedNative ? path.join(this.settings.root, 'agents', `${harness}-account`)
+        : sharedRuntimeHome(this.settings.root, harness, config.home);
     }
-    return config.authMode === 'api' || harness === 'opencode' ? path.join(this.settings.root, 'agents', harness) : config.home;
+    return path.join(this.settings.root, 'agents', harness);
   }
 
   private async environment(harness: AgentHarness, location: string) {
     const config = this.config(harness);
-    const ownsLocation = [harness, `${harness}-account`].some(name => projectKey(location) === projectKey(path.join(this.settings.root, 'agents', name)));
-    if (ownsLocation) await mkdir(location, { recursive: true });
+    const ownsLocation = projectKey(location) === projectKey(this.location(harness));
+    const shared = ownsLocation && config.authMode === 'native' && !config.isolatedNative && (harness === 'codex' || harness === 'kimi');
+    if (shared) await prepareSharedHome(harness, config.home, location);
+    else if (ownsLocation) await mkdir(location, { recursive: true });
     const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     if (harness === 'kimi') env.KIMI_CODE_HOME = location;
@@ -78,7 +83,7 @@ export class Agents {
         [model.providerID]: { npm: '@ai-sdk/openai-compatible', name: 'EntroTect', options: { apiKey: key, baseURL: config.baseUrl }, models: { [model.modelID]: { name: model.modelID } } },
       } });
     }
-    return { env, key };
+    return { env, key, sharedHome: shared ? config.home : undefined };
   }
 
   async requireExecutable(harness: AgentHarness) {
@@ -117,9 +122,10 @@ export class Agents {
 
   private async openClient(harness: AgentHarness, cwd: string, location: string, probe: boolean) {
     const { executable, prefix, args } = await this.command(harness);
-    const { env, key } = await this.environment(harness, location);
+    const { env, key, sharedHome } = await this.environment(harness, location);
     if (probe && harness === 'opencode') env.OPENCODE_DB = ':memory:';
     const overrides: string[] = [];
+    if (sharedHome && harness === 'codex') overrides.push('-c', 'cli_auth_credentials_store="ephemeral"');
     let apiLogin = false;
     if (harness === 'codex' && key) {
       const { baseUrl } = this.config(harness);
@@ -135,8 +141,54 @@ export class Agents {
     const client = await AgentClient.connect(harness, { executable, args: [...prefix, ...overrides, ...args] }, cwd, env);
     try {
       if (apiLogin) await client.rpc.request('account/login/start', { type: 'apiKey', apiKey: key }, 15_000);
+      if (sharedHome && harness === 'codex') client.useAccount(() => this.attachCodexAccount(client, cwd, sharedHome));
       return client;
     } catch (error) { await client.close(); throw error; }
+  }
+
+  private async attachCodexAccount(client: AgentClient, cwd: string, home: string) {
+    const store = await codexCredentialStore(home);
+    let account = store === 'file' ? await cachedCodexAccount(home) : await this.codexAccountFromCli(home, cwd, false);
+    if (!account) return;
+    if (account.type === 'chatgptAuthTokens') {
+      client.rpc.handleRequest('account/chatgptAuthTokens/refresh', async params => {
+        // Another native client may already have rotated the grant. In that
+        // case no second refresh is needed. Keep the refresh token exclusively
+        // in the official credential store.
+        let next = store === 'file' ? await cachedCodexAccount(home) : undefined;
+        if (!next || next.type !== 'chatgptAuthTokens' || next.accessToken === (account?.type === 'chatgptAuthTokens' && account.accessToken))
+          next = await this.codexAccountFromCli(home, cwd, true);
+        if (next?.type !== 'chatgptAuthTokens' || account?.type !== 'chatgptAuthTokens' ||
+          next.chatgptAccountId !== account.chatgptAccountId || params?.previousAccountId && params.previousAccountId !== next.chatgptAccountId)
+          throw new Error('Codex 登录账号已变更');
+        account = next;
+        return { accessToken: next.accessToken, chatgptAccountId: next.chatgptAccountId, chatgptPlanType: next.chatgptPlanType ?? null };
+      });
+    }
+    await client.rpc.request('account/login/start', account, 15_000);
+  }
+
+  private async codexAccountFromCli(home: string, cwd: string, refresh: boolean) {
+    const key = projectKey(home) + (refresh ? ':refresh' : ':read');
+    const pending = this.accountRefreshes.get(key);
+    if (pending) return pending;
+    const query = (async () => {
+      const { executable, prefix, args } = await this.command('codex');
+      const sqliteHome = path.join(sharedRuntimeHome(this.settings.root, 'codex', home), 'account-service');
+      await mkdir(sqliteHome, { recursive: true });
+      const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: home, CODEX_SQLITE_HOME: sqliteHome, NO_COLOR: '1' };
+      delete env.ELECTRON_RUN_AS_NODE;
+      const helper = await AgentClient.connect('codex', { executable, args: [...prefix, ...args] }, cwd, env);
+      try {
+        const status = await helper.rpc.request('getAuthStatus', { includeToken: true, refreshToken: refresh }, 30_000);
+        if (!status?.authToken) return;
+        if (status.authMethod === 'apikey') return { type: 'apiKey' as const, apiKey: String(status.authToken) };
+        if (status.authMethod === 'chatgpt' || status.authMethod === 'chatgptAuthTokens') return codexAccess(status.authToken);
+        throw new Error('当前 Codex 账号类型不支持工作台登录复用');
+      } finally { await helper.close(); }
+    })();
+    this.accountRefreshes.set(key, query);
+    try { return await query; } finally { this.accountRefreshes.delete(key); }
   }
 
   model(harness: AgentHarness, selected?: string) {
@@ -200,6 +252,7 @@ export class Agents {
     const cwd = (await stat(workspace).catch(() => undefined))?.isDirectory() ? workspace : this.settings.root;
     const client = await this.connect('codex', cwd);
     try {
+      await client.ensureAccount();
       const { account } = await client.rpc.request('account/read', { refreshToken: false }, 8_000);
       if (account?.type !== 'chatgpt') return undefined;
       return await client.rpc.request('account/rateLimits/read', {}, 12_000);
@@ -217,14 +270,22 @@ export class Agents {
   async list(harness: AgentHarness, location: string): Promise<NativeHistory[]> {
     const client = await this.connect(harness, this.settings.value.defaultWorkspace, location);
     try {
-      const rows = await Promise.all((await client.list()).map(async row => {
-        const updatedAt = historyTime(row.updatedAt), createdAt = historyTime(row.createdAt) || updatedAt;
-        const relative = typeof row.path === 'string' ? path.relative(location, row.path) : '';
-        const file = relative.startsWith(`sessions${path.sep}`) ? await stat(row.path!).catch(() => undefined) : undefined;
-        const version = harness === 'kimi' ? await kimiHistoryVersion(location, row.cwd, row.id).catch(() => undefined)
-          : file ? `${file.size}:${file.mtimeMs}` : row.updatedAt === undefined ? undefined : String(row.updatedAt);
-        return { id: row.id, title: row.title || '未命名对话', workspace: row.cwd, updatedAt, createdAt, version, busy: row.busy };
-      }));
+      const listed = await client.list();
+      const creation = harness === 'opencode' && listed.length ? await openCodeCreationTimes(path.join(location,'opencode.db')).catch(()=>undefined) : undefined;
+      const rows: NativeHistory[] = [];
+      for (let offset=0; offset<listed.length; offset+=32) {
+        rows.push(...await Promise.all(listed.slice(offset,offset+32).map(async row => {
+          const kimi = harness === 'kimi' ? await kimiHistoryMetadata(location,row.cwd,row.id).catch(()=>undefined) : undefined;
+          // An old unmarked copy can be continued today. Its last activity
+          // must never promote it to a newly created native chat.
+          const updatedAt = historyTime(row.updatedAt), createdAt = historyTime(row.createdAt ?? kimi?.createdAt ?? creation?.get(row.id));
+          const relative = typeof row.path === 'string' ? path.relative(location, row.path) : '';
+          const file = relative.startsWith(`sessions${path.sep}`) ? await stat(row.path!).catch(() => undefined) : undefined;
+          const version = harness === 'kimi' ? kimi?.version
+            : file ? `${file.size}:${file.mtimeMs}` : row.updatedAt === undefined ? undefined : String(row.updatedAt);
+          return { id: row.id, title: row.title || '未命名对话', workspace: row.cwd, updatedAt, createdAt, version, busy: row.busy };
+        })));
+      }
       return rows.sort((a, b) => b.updatedAt - a.updatedAt);
     } finally { await client.close(); }
   }
@@ -305,28 +366,34 @@ export class Agents {
     return { bundle, reports, checkpoint: { version: history.version, content: nativeContentFingerprint(history), turnId: 'turnId' in history ? history.turnId : undefined } };
   }
 
-  async import(c: Conversation, harness: AgentHarness, file: string, location = this.location(harness), view: 'resume' | 'archive' = 'resume', publish = false): Promise<NativeBinding> {
+  async import(c: Conversation, harness: AgentHarness, file: string, location = this.location(harness), view: 'resume' | 'archive' = 'resume', publish = false, allocated?: (id: string) => Promise<void>, reservedId?:string): Promise<NativeBinding> {
     const messages = bridgeEntries(JSON.parse(await readFile(file, 'utf8')), view);
     let sessionId: string;
-    if (harness === 'kimi') sessionId = (await writeKimiHistory(location, c.workspace, c.title, messages)).id;
+    if (harness === 'kimi') sessionId = (await writeKimiHistory(location, c.workspace, c.title, messages, allocated, reservedId)).id;
     else {
       let publication: Awaited<ReturnType<typeof readCodexHistory>> | undefined;
       const client = await this.connect(harness, c.workspace, location);
       try {
         if (harness === 'codex') {
-          sessionId = (await writeCodexHistory(client, c.workspace, c.title, messages)).id;
-          if (publish) publication = await readCodexHistory(client, location, sessionId);
+          sessionId = (await writeCodexHistory(client, c.workspace, c.title, messages, allocated, reservedId ? {home:location,id:reservedId} : undefined)).id;
+          if (publish) {
+            const history = await readCodexHistory(client, location, sessionId);
+            if (!history.listed) publication = history;
+          }
         }
         else {
           const config = this.config(harness);
           let model = openCodeModel(this.model(harness, c.modelId), config.provider);
           if (!model) {
-            const probe = await client.open(c.workspace);
-            model = openCodeModel(probe.configOptions?.find(option => option.id === 'model')?.currentValue ?? probe.models?.currentModelId, '');
+            const scratch = await this.connect('opencode', c.workspace, location, true);
+            try {
+              const probe = await scratch.open(c.workspace);
+              model = openCodeModel(probe.configOptions?.find(option => option.id === 'model')?.currentValue ?? probe.models?.currentModelId, '');
+            } finally { await scratch.close(); }
           }
           if (!model) throw new Error('OpenCode 尚未提供默认模型，请先在连接设置中配置');
           const command = await this.command(harness);
-          sessionId = await writeOpenCodeHistory({ ...command, ...(await this.environment(harness, location)) }, c.workspace, c.title, messages, model);
+          sessionId = await writeOpenCodeHistory({ ...command, ...(await this.environment(harness, location)) }, c.workspace, c.title, messages, model, allocated,reservedId);
         }
       } finally { await client.close(); }
       if (publication) await publishCodexHistory(location, publication, sessionId);
@@ -334,12 +401,20 @@ export class Agents {
     return { sessionId, revision: c.revision, location, ...(!publish && { seed: { file, view } }) };
   }
 
-  async append(c: Conversation, harness: AgentHarness, location: string, sessionId: string, expected: string, messages: readonly PortableEntry[], canCommit: (result: readonly PortableEntry[]) => Promise<NativeCommitState | void>) {
+  async append(c: Conversation, harness: AgentHarness, location: string, sessionId: string, expected: string, messages: readonly PortableEntry[], canCommit: (result: readonly PortableEntry[]) => Promise<NativeCommitState | void>, replace = false) {
     if (harness === 'codex') {
       const client = await this.connect(harness, c.workspace, location);
       try {
         const original = await readCodexHistory(client, location, sessionId);
         if (original.version !== expected || original.busy) throw new Error('Codex 会话已更新或还未结束');
+        if (replace) {
+          // Windows cannot replace a rollout while the app-server holds it open.
+          await client.close();
+          const activity = await canCommit(messages);
+          if (activity?.externalOpen) throw new Error('请先退出独立 Codex 再解决分歧');
+          await replaceCodexHistory(original, messages);
+          return messages;
+        }
         const delta = unpublishedEntries(original.history, messages);
         if (!delta.length) return original.history;
         const result = [...original.history, ...delta];
@@ -367,12 +442,12 @@ export class Agents {
     }
     const original = await this.read(harness, location, c.workspace, sessionId);
     if (original.version !== expected) throw new Error('原生会话已在独立端更新');
-    const delta = unpublishedEntries(original.history, messages);
+    const delta = replace ? messages : unpublishedEntries(original.history, messages);
     if (!delta.length) return original.history;
-    const result = [...original.history, ...delta];
+    const result = replace ? [...messages] : [...original.history, ...delta];
     const activity = await canCommit(result);
-    if (harness === 'kimi') await appendKimiHistory(location, c.workspace, sessionId, expected, delta);
-    else await appendOpenCodeHistory(path.join(location, 'opencode.db'), c.workspace, sessionId, expected, messages, activity?.externalOpen);
+    if (harness === 'kimi') await appendKimiHistory(location, c.workspace, sessionId, expected, delta, replace);
+    else await appendOpenCodeHistory(path.join(location, 'opencode.db'), c.workspace, sessionId, expected, messages, activity?.externalOpen, replace);
     return result;
   }
 }

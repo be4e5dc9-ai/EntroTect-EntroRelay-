@@ -13,6 +13,7 @@ import { TokenActivity } from './token-activity';
 import { RuntimeUpdates } from './runtime-updates';
 import { harnesses } from '../shared/types';
 import { isAgentHarness, isHarness, supportsIsolatedLogin } from '../shared/harnesses';
+import { projectKey } from '../shared/project-path';
 
 const write=(value: unknown)=>process.stdout.write(JSON.stringify(value)+'\n');
 let next=0;
@@ -33,6 +34,7 @@ const project=new WorkspaceService();
 const history=new HistoryService(controller);
 const sync=new HistorySync(controller,history,emit);await sync.init();synchronization=sync;
 const harness=(value:unknown)=>{if(!isHarness(value))throw new Error('不支持的 Harness');return value;};
+const blueprintState = () => ({onboarded:sync.blueprint.onboarded,rules:sync.blueprint.rules,conflicts:sync.conflicts()});
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
 let shutdown: Promise<boolean> | undefined;
 async function closeBackend() {
@@ -50,6 +52,21 @@ async function call(method:string,p:any={}) {
     case 'runtime:updateStatus':return updates.status;
     case 'runtime:checkUpdates':return updates.check();
     case 'history:sync':return sync.run(true);
+    case 'blueprint:state':return blueprintState();
+    case 'blueprint:catalog':return sync.blueprint.catalog(harness(p.harness),(source,id)=>sync.linkedApp(source,id));
+    case 'blueprint:dismiss':return sync.blueprint.dismiss();
+    case 'blueprint:rule':
+      await sync.blueprint.setRule(p.scope,p.target,p.enabled);
+      sync.schedule();
+      return blueprintState();
+    case 'blueprint:confirm':
+      await sync.blueprint.confirm(p.scopes,p.classification);
+      sync.schedule();
+      return;
+    case 'blueprint:resolve':
+      await sync.resolveConflict(p.id,p.choice);
+      sync.schedule();
+      return blueprintState();
     case 'history:status':return sync.status;
     case 'history:defaults':return history.defaults();
     case 'history:list':return sync.listHistory(p.source);
@@ -57,7 +74,7 @@ async function call(method:string,p:any={}) {
     case 'history:import-selection':return sync.setImportSelection(p.rule);
     case 'history:export-selection':return sync.exportSelection(p.scope);
     case 'history:save-export-selection':return sync.setExportSelection(p.scope,p.rules);
-    case 'history:export':return history.export(p.request);
+    case 'history:export':return sync.exportManually(p.request);
     case 'agent:login':{
       const engine=harness(p.harness);
       if(!supportsIsolatedLogin(engine))throw new Error('当前 Harness 不使用独立登录');
@@ -65,14 +82,33 @@ async function call(method:string,p:any={}) {
     }
     case 'bootstrap':{
       const health=await settings.health();
-      return {conversations:store.list(),projects:store.projects(),settings:settings.view(),health,dataDir:root,reasoning:reasoningCatalog(settings.value),historySync:sync.status,startupRoute:controller.startupRoute};
+      return {conversations:store.list(),projects:store.projects(),projectOrigins:store.projectOrigins,blueprintOnboarded:sync.blueprint.onboarded,settings:settings.view(),health,dataDir:root,reasoning:reasoningCatalog(settings.value),historySync:sync.status,startupRoute:controller.startupRoute};
     }
     case 'runtime:selection':return controller.rememberRuntime(harness(p.harness),typeof p.conversationId==='string'?p.conversationId:undefined);
-    case 'project:add':return store.addProject(p.workspace);
-    case 'project:create':return store.createProject(p.parent,p.name);
+    case 'project:add':
+    case 'project:create':{
+      const origin = p.originHarness && harness(p.originHarness);
+      const location = origin ? history.defaults()[harness(origin)].location : undefined;
+      const workspace = await (method === 'project:add' ? store.addProject(p.workspace,origin,location) : store.createProject(p.parent,p.name,origin,location));
+      const registered = store.projectOrigins[projectKey(workspace)];
+      if (registered) {
+        await sync.blueprint.claimLegacyProject({harness:registered,location:store.projectLocations[projectKey(workspace)] ?? history.defaults()[registered].location},workspace);
+        sync.schedule();
+      }
+      return workspace;
+    }
     case 'account:usage':return accountUsage.read(harness(p.harness),p.refresh===true);
     case 'account:activity':return tokenActivity.read();
-    case 'conversation:create':return controller.create(p.workspace,harness(p.harness));
+    case 'conversation:create':{
+      const engine = harness(p.harness);
+      const origin = p.originHarness === undefined ? store.projectOrigins[projectKey(p.workspace)] ?? engine : harness(p.originHarness);
+      const location = store.projectOrigins[projectKey(p.workspace)] === origin && store.projectLocations[projectKey(p.workspace)];
+      const source = location ? {harness:origin,location} : history.defaults()[origin];
+      const chat = await controller.create(p.workspace,engine,source);
+      await sync.blueprint.claimLegacyProject(source,chat.workspace);
+      sync.schedule();
+      return chat;
+    }
     case 'commands:list':return controller.listCommands(harness(p.harness),p.workspace,p.modelId,p.id);
     case 'models:native': {
       const engine = harness(p.harness);

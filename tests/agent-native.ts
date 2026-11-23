@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { on } from 'node:events';
 import { AgentClient } from '../backend/agent-client';
-import { readCodexHistory, writeCodexHistory } from '../backend/codex-history';
+import { publishCodexHistory, readCodexHistory, writeCodexHistory } from '../backend/codex-history';
 import { bridgeEntries, bridgeMessages, bundledContext, messagesToBridge, portableHistoryFingerprint, type PortableEntry, type PortableMessage } from '../backend/portable-history';
 import { readDeepSeekContext, writeDeepSeekContext } from '../backend/dsh-context';
 import { readKimiHistory, writeKimiHistory } from '../backend/kimi-history';
@@ -294,7 +294,7 @@ test('Codex prewarms the last conversation and keeps its process after interrupt
   } finally { await controller.close(); }
 });
 
-test('Codex history import and manual continuation reuse the original thread in the same profile', { skip: !codex, timeout: 90_000 }, async t => {
+test('Codex import and repeated manual continuation preserve the independent thread ID', { skip: !codex, timeout: 90_000 }, async t => {
   const { root, home, cwd, cleanup } = await profile();
   t.after(cleanup);
   const store = new Store(path.join(root, 'app'));
@@ -305,58 +305,28 @@ test('Codex history import and manual continuation reuse the original thread in 
   settings.value.agents = { ...settings.value.agents, codex: { ...defaultAgentConnection('codex'), executable: codex!, home } };
   const controller = new Controller(store, settings, () => {});
   const history = new HistoryService(controller);
-  const sync = new HistorySync(controller, history, () => {});
+  const sync = new HistorySync(controller, history, () => {}, async () => ({}));
   await sync.init();
   const source = { harness: 'codex' as const, location: home };
   try {
-    for (const automatic of [false, true]) {
-      const chat = await controller.create(cwd, 'deepseek');
-      const time = Date.now();
-      chat.title = automatic ? 'Automatically discovered history' : 'Manually imported history';
-      chat.revision = 1;
-      if (automatic) chat.bindings.codex = { sessionId: randomUUID(), revision: chat.revision, location: home };
-      chat.canonicalPath = path.join(store.directory(chat.id), 'context', 'fixture.entrotect.json');
-      await atomicJson(chat.canonicalPath, messagesToBridge([{ role: 'user', text: chat.title, time }], {
-        id: chat.id, title: chat.title, cwd, createdAt: time, updatedAt: time,
-      }));
-      await store.save(chat);
-      const copy = await history.export({ conversationId: chat.id, target: source });
-      assert.equal(copy.reused, undefined);
-      const published = await controller.agents.read('codex', home, cwd, copy.sessionId);
-      assert('file' in published);
-      if (automatic) {
-        // Newer Codex records its visible user turns as completed items.
-        const rollout = (await readFile(published.file, 'utf8')).trimEnd().split(/\r?\n/).map(line => JSON.parse(line));
-        const user = rollout.find(row => row.type === 'event_msg' && row.payload.type === 'user_message');
-        user.payload = {
-          type: 'item_completed', thread_id: copy.sessionId, turn_id: randomUUID(),
-          item: { type: 'UserMessage', id: randomUUID(), content: [{ type: 'text', text: chat.title }] },
-          started_at_ms: time, completed_at_ms: time,
-        };
-        await writeFile(published.file, rollout.map(row => JSON.stringify(row)).join('\n') + '\n');
-      }
-      const native = await controller.agents.read('codex', home, cwd, copy.sessionId);
-      assert('listed' in native && native.listed);
-      const request = { source, sessionId: copy.sessionId };
-      const imported = automatic ? await history.import(request, undefined, true) : await sync.importManually(request);
-      assert.equal(imported.bindings.codex?.sessionId, copy.sessionId);
-      assert.equal(imported.bindings.codex?.revision, imported.revision);
-      assert.equal((await sync.importManually(request)).id, imported.id);
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const receipt = await history.export({ conversationId: imported.id, target: source });
-        assert.equal(receipt.sessionId, copy.sessionId);
-        assert.equal(receipt.reused, true);
-      }
-      assert.equal((await controller.agents.read('codex', home, cwd, copy.sessionId)).version, native.version);
-      if (automatic) {
-        const resident: AgentClient = await (controller as any).prepareRuntime(imported, false).agent;
-        await resident.open(cwd, copy.sessionId);
-        assert.equal((await history.export({ conversationId: imported.id, target: source })).sessionId, copy.sessionId);
-        assert.equal(resident.rpc.available, false);
-      }
-      await controller.verifyNative(imported);
+    const native = await controller.agents.connect('codex', cwd, home);
+    const original = await writeCodexHistory(native, cwd, 'External source', [{ role: 'user', text: 'Original message', time: Date.now() }]);
+    const seeded = await readCodexHistory(native, home, original.id);
+    await native.close();
+    await publishCodexHistory(home, seeded, original.id);
+    const request = { source, sessionId: original.id };
+    const imported = await sync.importManually(request);
+    assert.equal(imported.origin?.sessionId, original.id);
+    assert.equal(imported.bindings.codex?.location, controller.agents.location('codex'));
+    assert.notEqual(imported.bindings.codex?.sessionId, original.id);
+    assert.equal((await sync.importManually(request)).id, imported.id);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const receipt = await sync.exportManually({ conversationId: imported.id, target: source });
+      assert.equal(receipt.sessionId, original.id);
+      assert.equal(receipt.reused, true);
     }
-    assert.equal((await history.list(source)).sessions.length, 2);
+    await controller.verifyNative(imported);
+    assert.deepEqual((await history.list(source)).sessions.map(entry => entry.id), [original.id]);
   } finally { await sync.stop(); await controller.close(); }
 });
 
@@ -415,120 +385,172 @@ for (const harness of ['kimi', 'opencode'] as const) {
 
 for (const harness of ['kimi', 'codex'] as const) {
   const executable = harness === 'codex' ? codex : process.env.ENTROTECT_TEST_KIMI;
-  test(`${harness} recognizes its shared native checkpoint and pulls an independent turn without forking`, { skip: !executable, timeout: 90_000 }, async t => {
-    const previousProxy = { upper: process.env.NO_PROXY, lower: process.env.no_proxy };
-    process.env.NO_PROXY = '127.0.0.1';
-    process.env.no_proxy = '127.0.0.1';
-    t.after(() => {
-      for (const [key, value] of Object.entries({ NO_PROXY: previousProxy.upper, no_proxy: previousProxy.lower })) {
-        if (value === undefined) delete process.env[key]; else process.env[key] = value;
-      }
-    });
+  test(`${harness} shares native identity with private history and an explicit stable publication`, { skip: !executable, timeout: 120_000 }, async t => {
     const { root, home, cwd, env, cleanup } = await profile();
     const fixture = await modelFixture();
-    const store = new Store(path.join(root, 'app'));
-    await store.init();
-    const settings = new SettingsStore(store.root, path.resolve('.runtime'), process.execPath, { protect: async value => value, unprotect: async value => value });
-    await settings.init();
-    const config = { ...defaultAgentConnection(harness), executable: executable!, home, model: 'fixture' };
-    await settings.save({
-      ...settings.value, defaultWorkspace: cwd, history: { autoImport: true, autoExport: true, importScope: 'all', exportScope: 'all', sources: {
-        deepseek: path.join(root, 'absent-deepseek'), zcode: path.join(root, 'absent-zcode.db'),
-        kimi: path.join(root, 'absent-kimi'), opencode: path.join(root, 'absent-opencode'),
-        codex: path.join(root, 'absent-codex'), [harness]: home,
-      } },
-      agents: { ...settings.value.agents, [harness]: config },
-    });
-    const provider = harness === 'kimi' ? [
+    const data = path.join(root, 'app');
+    const source = { harness, location: home };
+    const kimiCredential = (access_token: string) => ({ access_token, refresh_token: 'synthetic-refresh',
+      expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, token_type: 'Bearer' });
+    const previousProxy = process.env.NO_PROXY;
+    process.env.NO_PROXY = '127.0.0.1';
+    t.after(() => { if (previousProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = previousProxy; });
+    await writeFile(path.join(home, 'config.toml'), (harness === 'kimi' ? [
       'default_model = "fixture"', '[providers.fixture]', 'type = "openai"', `base_url = "${fixture.origin}/v1"`,
-      'api_key = "local-fixture-only"', '[models.fixture]', 'provider = "fixture"', 'model = "fixture"', 'max_context_size = 32768',
+      `oauth = { storage = "file", key = "oauth/fixture", oauth_host = "${fixture.origin}" }`,
+      '[models.fixture]', 'provider = "fixture"', 'model = "fixture"', 'max_context_size = 32768',
     ] : [
       'model = "fixture"', 'model_provider = "fixture"', '[model_providers.fixture]', 'name = "Fixture"',
       `base_url = "${fixture.origin}/v1"`, 'wire_api = "responses"', 'stream_max_retries = 0', 'request_max_retries = 0',
-    ];
-    await writeFile(path.join(home, 'config.toml'), provider.join('\n'));
-    const controller = new Controller(store, settings, () => {});
-    const history = new HistoryService(controller);
-    const sync = new HistorySync(controller, history, () => {}, async () => ({}));
-    const readLinks = () => readFile(path.join(store.root, 'history-sync.json'), 'utf8').then(JSON.parse);
+    ]).join('\n'));
+    if (harness === 'kimi') {
+      await mkdir(path.join(home, 'credentials'));
+      await atomicJson(path.join(home, 'credentials', 'fixture.json'), kimiCredential('synthetic-A'));
+    } else {
+      await atomicJson(path.join(home, 'auth.json'), { OPENAI_API_KEY: 'sk-synthetic-local-only', auth_mode: 'apikey' });
+    }
+    const nativeFiles = await readdir(home);
+    const load = async () => {
+      const store = new Store(data); await store.init();
+      const settings = new SettingsStore(data, path.resolve('.runtime'), process.execPath, { protect: async value => value, unprotect: async value => value });
+      await settings.init();
+      await settings.save({ ...settings.value, defaultWorkspace: cwd,
+        agents: { ...settings.value.agents, [harness]: { ...defaultAgentConnection(harness), executable: executable!, home, model: 'fixture' } },
+        startup: { followLast: true, additional: [harness] }, history: { autoImport:true, autoExport:true, sources: { [harness]:home } } });
+      const controller = new Controller(store, settings, () => {});
+      const history = new HistoryService(controller);
+      const sync = new HistorySync(controller, history, () => {}, async () => ({})); await sync.init();
+      await controller.initStartup(); controller.startPrewarming();
+      return { store, settings, controller, history, sync };
+    };
+    let app = await load();
+    const send = async (id: string, marker: string) => {
+      fixture.reply(marker + '-REPLY');
+      await app.controller.send(id, marker);
+      return idle(app.controller, app.store, id);
+    };
     try {
-      await sync.init();
-      const { id } = await controller.create(cwd, harness);
-      const send = async (marker: string) => {
-        fixture.reply(marker + '-REPLY');
-        await controller.send(id, marker + '-QUESTION');
-        const chat = await idle(controller, store, id).catch(async error => {
-          if (harness !== 'kimi') throw error;
-          const binding = store.get(id).bindings.kimi;
-          const native = binding && await readKimiHistory(home, cwd, binding.sessionId).catch(() => undefined);
-          throw new Error(`${error.message}\nFixture calls: ${fixture.requests.length}\n${native?.wireRaw.split('\n').slice(-9).join('\n') ?? ''}`);
-        });
-        const result = await sync.run(true);
-        assert.deepEqual(result.issues, []);
-        assert.equal(store.list().length, 1);
-        assert.equal((await readLinks()).links.length, 1);
-        assert.equal((await readLinks()).links[0].revision, chat.revision);
-        return chat.bindings[harness]!.sessionId;
-      };
-      const nativeId = await send('DESKTOP-SHARED-FIRST');
-      assert.equal(await send('DESKTOP-SHARED-SECOND'), nativeId);
-      await controller.releaseRuntime(id);
-
-      const command = executable!.endsWith('.mjs') ? { executable: process.execPath, args: [executable!, ...config.args] } : config;
-      const native = await AgentClient.connect(harness, command, cwd, { ...env, KIMI_CODE_HOME: home, CODEX_HOME: home, NO_PROXY: '127.0.0.1' });
+      const { id } = await app.controller.create(cwd, harness, source);
+      const first = await send(id, 'PRIVATE-FIRST');
+      const binding = first.bindings[harness]!;
+      assert.notEqual(binding.location, home);
+      assert.deepEqual((await app.sync.run(true)).issues, []);
+      assert.deepEqual(await readdir(home), nativeFiles, 'prewarm and unlinked work must leave the native home untouched');
+      if (harness === 'kimi') {
+        assert(fixture.requests.some(req => req.authorization === 'Bearer synthetic-A'));
+        await atomicJson(path.join(home,'credentials','fixture.json'), { ...kimiCredential('synthetic-B'), expires_at: 1 });
+        assert.equal(JSON.parse(await readFile(path.join(binding.location!, 'credentials', 'fixture.json'), 'utf8')).access_token, 'synthetic-B');
+        fixture.refreshOAuth('/api/oauth/token', { ...kimiCredential('synthetic-C'), refresh_token: 'synthetic-refreshed' });
+      } else {
+        assert(!(await readdir(binding.location!)).includes('auth.json'));
+      }
+      await app.sync.stop(); await app.controller.close();
+      app = await load();
+      const second = await send(id, 'PRIVATE-AFTER-RESTART');
+      assert.equal(second.bindings[harness]!.sessionId, binding.sessionId);
+      assert.deepEqual(await readdir(home), nativeFiles);
+      assert(fixture.requests.some(req => JSON.stringify(req.body).includes('PRIVATE-FIRST') && JSON.stringify(req.body).includes('PRIVATE-AFTER-RESTART')));
+      if (harness === 'kimi') {
+        assert(fixture.requests.some(req => req.authorization === 'Bearer synthetic-C'));
+        const refreshes = fixture.requests.filter(req => req.path === '/api/oauth/token');
+        assert.deepEqual(refreshes.map(req => req.body.refresh_token), ['synthetic-refresh']);
+        assert.equal(JSON.parse(await readFile(path.join(home, 'credentials', 'fixture.json'), 'utf8')).refresh_token, 'synthetic-refreshed');
+      }
+      const scope = app.sync.blueprint.scope(second)!;
+      await app.sync.blueprint.setRule(scope, harness, true);
+      assert.deepEqual((await app.sync.run(true)).issues, []);
+      const published = await app.history.list(source);
+      assert.equal(published.sessions.length, 1);
+      const nativeId = published.sessions[0].id;
+      assert.notEqual(nativeId, binding.sessionId);
+      assert.equal((await app.sync.exportManually({ conversationId:id,target:source })).sessionId, nativeId);
+      const config = defaultAgentConnection(harness);
+      const command = executable!.endsWith('.mjs') ? { executable: process.execPath,args:[executable!,...config.args] } : { executable:executable!,args:config.args };
+      const native = await AgentClient.connect(harness, command, cwd, { ...env, KIMI_CODE_HOME:home, CODEX_HOME:home, NO_PROXY:'127.0.0.1' });
       try {
-        fixture.reply('INDEPENDENT-SHARED-REPLY');
-        await native.turn(await native.open(cwd, nativeId), 'INDEPENDENT-SHARED-QUESTION', { signal: AbortSignal.timeout(30_000) });
+        fixture.reply('INDEPENDENT-REPLY');
+        await native.turn(await native.open(cwd,nativeId), 'INDEPENDENT-QUESTION', { signal:AbortSignal.timeout(30_000) });
       } finally { await native.close(); }
-      const imported = await sync.run(true);
-      assert.deepEqual(imported.issues, []);
-      assert.equal(imported.imported, 1);
-      assert((await store.items(id)).some(item => item.text === 'INDEPENDENT-SHARED-REPLY'));
-      assert.equal(await send('DESKTOP-SHARED-THIRD'), nativeId);
-      const source = { harness, location: home };
-      const listed = await history.list(source);
-      assert.deepEqual(listed.sessions.map(session => session.id), [nativeId]);
-      const fingerprint = (await history.inspect(source, nativeId)).fingerprint;
-      await controller.updateConnections(() => settings.save({
-        ...settings.value,
-        history: { ...settings.value.history, autoImport: false, autoExport: false },
-        agents: { ...settings.value.agents, [harness]: { ...config, isolatedNative: true } },
-      }));
-      const login = await controller.agents.loginCommand(harness);
-      assert.equal(login.args.at(-1), 'login');
-      assert.equal(login.home, path.join(store.root, 'agents', `${harness}-account`));
-      await writeFile(path.join(login.home, 'config.toml'), provider.join('\n'));
-      fixture.reply('DESKTOP-ISOLATED-ACCOUNT-REPLY');
-      await controller.send(id, 'DESKTOP-ISOLATED-ACCOUNT-QUESTION');
-      const accountChat = await idle(controller, store, id);
-      assert.equal(accountChat.bindings[harness]!.location, login.home);
-      assert.notEqual(accountChat.bindings[harness]!.sessionId, nativeId);
-      assert.equal((await history.inspect(source, nativeId)).fingerprint, fingerprint);
-      assert(fixture.requests.some(request => JSON.stringify(request.body).includes('DESKTOP-ISOLATED-ACCOUNT-QUESTION') &&
-        JSON.stringify(request.body).includes('INDEPENDENT-SHARED-REPLY')));
-      settings.value.history = { ...settings.value.history, autoImport: false, autoExport: true };
-      assert.deepEqual((await sync.run(true)).issues, []);
-      assert.equal((await readLinks()).links[0].sessionId, nativeId);
-      const published = await controller.agents.read(harness, home, cwd, nativeId);
-      assert(published.archived.some(entry => entry.text === 'DESKTOP-ISOLATED-ACCOUNT-REPLY'));
-      const publishedFingerprint = (await history.inspect(source, nativeId)).fingerprint;
-
-      await controller.updateConnections(() => settings.save({
-        ...settings.value,
-        history: { ...settings.value.history, autoImport: false, autoExport: false },
-        agents: { ...settings.value.agents, [harness]: { ...config, authMode: 'api', baseUrl: `${fixture.origin}/v1` } },
-      }, { [harness]: 'local-fixture-only' }));
-      fixture.reply('DESKTOP-ISOLATED-REPLY');
-      await controller.send(id, 'DESKTOP-ISOLATED-QUESTION');
-      const isolated = await idle(controller, store, id);
-      assert.notEqual(isolated.bindings[harness]!.sessionId, nativeId);
-      assert.notEqual(isolated.bindings[harness]!.location, login.home);
-      assert.equal((await history.inspect(source, nativeId)).fingerprint, publishedFingerprint);
-      assert(fixture.requests.some(request => JSON.stringify(request.body).includes('DESKTOP-ISOLATED-QUESTION') &&
-        JSON.stringify(request.body).includes('INDEPENDENT-SHARED-REPLY')));
-    } finally { await sync.stop(); await controller.close(); await fixture.close(); await cleanup(); }
+      assert.deepEqual((await app.sync.run(true)).issues, []);
+      assert((await app.store.items(id)).some(item => item.text === 'INDEPENDENT-REPLY'));
+      assert.equal(app.store.list().length, 1);
+      await send(id, 'AFTER-INDEPENDENT');
+      assert.deepEqual((await app.sync.run(true)).issues, []);
+      assert.deepEqual((await app.history.list(source)).sessions.map(row => row.id), [nativeId]);
+      assert((await app.controller.agents.read(harness,home,cwd,nativeId)).archived.some(item => item.text === 'AFTER-INDEPENDENT-REPLY'));
+    } finally { await app.sync.stop(); await app.controller.close(); await fixture.close(); await cleanup(); }
   });
 }
+
+for (const independentlyRotated of [true, false]) test(`Codex reuses ${independentlyRotated ? 'already rotated' : 'officially refreshed'} native ChatGPT credentials without persisting them in the runtime`, { skip: !codex, timeout: 45_000 }, async t => {
+  const { root, home, cwd, cleanup } = await profile();
+  const fixture = await modelFixture();
+  t.after(async () => { await fixture.close(); await cleanup(); });
+  for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'CODEX_DISABLE_TELEMETRY', 'CODEX_REFRESH_TOKEN_URL_OVERRIDE']) {
+    const saved = process.env[key];
+    process.env[key] = key.toLowerCase() === 'no_proxy' ? '127.0.0.1' : key === 'CODEX_DISABLE_TELEMETRY' ? '1'
+      : key === 'CODEX_REFRESH_TOKEN_URL_OVERRIDE' ? `${fixture.origin}/oauth/token` : 'http://127.0.0.1:1';
+    t.after(() => { if (saved === undefined) delete process.env[key]; else process.env[key] = saved; });
+  }
+  const settings = new SettingsStore(path.join(root, 'app'), path.resolve('.runtime'), process.execPath, { protect: async value => value, unprotect: async value => value });
+  await settings.init();
+  await settings.save({ ...settings.value, defaultWorkspace: cwd,
+    agents: { ...settings.value.agents, codex: { ...defaultAgentConnection('codex'), executable: codex!, home, model: 'fixture' } } });
+  await writeFile(path.join(home, 'config.toml'), [
+    'model = "fixture"', 'model_provider = "fixture"', `chatgpt_base_url = "${fixture.origin}/backend-api/"`,
+    '[model_providers.fixture]', 'name = "Fixture"',
+    `base_url = "${fixture.origin}/v1"`, 'wire_api = "responses"', 'requires_openai_auth = true',
+    'stream_max_retries = 0', 'request_max_retries = 0',
+  ].join('\n'));
+  const accountId = 'synthetic-workspace';
+  const token = (id: string) => [
+    { alg: 'RS256', typ: 'JWT' },
+    { jti: id, email: 'fixture@example.invalid', exp: Math.floor(Date.now() / 1000) + 3600,
+      'https://api.openai.com/auth': { chatgpt_account_id: accountId, chatgpt_plan_type: 'plus' } },
+  ].map(part => Buffer.from(JSON.stringify(part)).toString('base64url')).concat('signature').join('.');
+  const previous = token('previous');
+  const rotated = token('rotated');
+  const authPath = path.join(home, 'auth.json');
+  const writeAccount = (accessToken: string) => atomicJson(authPath, { auth_mode: 'chatgpt',
+    tokens: { id_token: token('id'), access_token: accessToken, refresh_token: 'native-only-fixture', account_id: accountId },
+    last_refresh: new Date().toISOString() });
+  await writeAccount(previous);
+  const nativeFiles = (await readdir(home)).sort();
+  fixture.refreshOAuth('/oauth/token', { id_token: token('id'), access_token: rotated, refresh_token: 'native-rotated-fixture' });
+  fixture.authorizeCodex(async authorization => {
+    if (independentlyRotated && authorization === `Bearer ${previous}`) await writeAccount(rotated);
+    return authorization === `Bearer ${rotated}`;
+  });
+  const controller = new Controller(new Store(settings.root), settings, () => {});
+  const client = await controller.agents.connect('codex', cwd);
+  let refreshResult: unknown;
+  const handleRequest = client.rpc.handleRequest.bind(client.rpc);
+  client.rpc.handleRequest = (method, handler) => handleRequest(method, async params => {
+    const result = await handler(params);
+    if (method === 'account/chatgptAuthTokens/refresh') refreshResult = result;
+    return result;
+  });
+  try {
+    const session = await client.open(cwd, undefined, 'fixture');
+    // The local fixture does not implement the workspace policy service that
+    // Codex rechecks on an in-flight auth change. Verify the protocol response
+    // and the active credential even if Codex fails that policy recheck.
+    await client.turn(session, 'ROTATE-SECRET', { signal: AbortSignal.timeout(30_000) }).catch(error => {
+      if (!refreshResult || !/application network policy is unavailable/i.test(error.message)) throw error;
+    });
+    assert.equal(fixture.requests.find(request => request.path.endsWith('/responses'))?.authorization, `Bearer ${previous}`);
+    assert.deepEqual(refreshResult, { accessToken: rotated, chatgptAccountId: accountId, chatgptPlanType: 'plus' });
+    assert.equal((await client.rpc.request('getAuthStatus', { includeToken: true, refreshToken: false })).authToken, rotated);
+    assert(!(await readdir(controller.agents.location('codex'))).includes('auth.json'));
+    const sourceFiles = (await readdir(home)).sort();
+    if (independentlyRotated) assert.deepEqual(sourceFiles, nativeFiles);
+    assert(!sourceFiles.some(file => /^(?:sessions|archived_sessions|session_index\.jsonl)$|\.sqlite(?:$|-)/.test(file)));
+    const sourceTokens = JSON.parse(await readFile(authPath, 'utf8')).tokens;
+    assert.equal(sourceTokens.access_token, rotated);
+    assert.equal(sourceTokens.refresh_token, independentlyRotated ? 'native-only-fixture' : 'native-rotated-fixture');
+    assert.equal(fixture.requests.filter(request => request.path === '/oauth/token').length, independentlyRotated ? 0 : 1);
+  } finally { await client.close(); await controller.close(); }
+});
 
 test('Codex resumes imported compacted history and recovers a legacy overflow before retry or switch', { skip: !codex, timeout: 90_000 }, async () => {
   const { root, home, cwd, cleanup } = await profile();
@@ -764,7 +786,8 @@ for (const harness of ['kimi', 'opencode', 'codex'] as const) {
     } } });
     const open = () => AgentClient.connect(harness, { executable: executable!.endsWith('.mjs') ? process.execPath : executable!, args: executable!.endsWith('.mjs') ? [executable!, ...configuration.args] : configuration.args }, cwd, env);
     try {
-      const chat = await controller.create(cwd, 'deepseek');
+      const chat = await controller.create(cwd, 'deepseek', history.defaults().deepseek);
+      await sync.blueprint.setRule(sync.blueprint.scope(chat)!,harness,true);
       chat.title = 'Synchronization fixture';
       chat.canonicalPath = path.join(store.directory(chat.id), 'context', 'fixture.hbridge.json');
       const start = Date.now();
@@ -782,6 +805,9 @@ for (const harness of ['kimi', 'opencode', 'codex'] as const) {
       assert.equal(initial.exported, 1);
       const index = () => readFile(path.join(store.root, 'history-sync.json'), 'utf8').then(JSON.parse);
       const id = (await index()).links[0].sessionId;
+      const target = {harness,location:home};
+      const created = (await history.list(target)).sessions.find(session=>session.id===id)!.createdAt;
+      assert(created>0,'origin review needs the original creation timestamp');
       if (harness === 'opencode') {
         opened = await open();
         await opened.open(cwd, id);
@@ -842,6 +868,7 @@ for (const harness of ['kimi', 'opencode', 'codex'] as const) {
       }
       const imported = await sync.run(true);
       assert.deepEqual(imported.issues, []);
+      assert.equal((await history.list(target)).sessions.find(session=>session.id===id)!.createdAt,created,'independent replies must preserve creation time');
       assert.equal(store.list().length, 1);
       assert.equal(store.list()[0].id, chat.id);
       assert((await store.items(chat.id)).some(item => item.text.includes('STANDALONE-REPLY-43')));
@@ -865,7 +892,7 @@ for (const harness of ['kimi', 'opencode', 'codex'] as const) {
       await controller.send(chat.id, 'DESKTOP-PRIVATE-63');
       for (let n = 0; n < 600 && controller.isBusy(chat.id); n++) await delay(50);
       assert.equal(store.get(chat.id).state, 'idle', store.get(chat.id).error);
-      await sync.run(true);
+      await sync.run();
       assert.equal((await history.inspect(source, id)).fingerprint, fingerprint);
       assert.equal(store.list().length, 1);
       const divergent = await open();
@@ -873,13 +900,15 @@ for (const harness of ['kimi', 'opencode', 'codex'] as const) {
         fixture.reply('STANDALONE-BRANCH-77');
         await divergent.turn(await divergent.open(cwd, id), 'STANDALONE-BRANCH-75', { signal: AbortSignal.timeout(30_000) });
       } finally { await divergent.close(); }
-      await sync.run(true);
+      await sync.run();
       assert.equal(store.list().length, 1, 'disabled imports must not add the independent branch');
       const recovered = new HistorySync(controller, history, () => {}, async () => ({}));
       await recovered.init();
       settings.value.history = { autoExport: false, autoImport: true };
       try {
         assert.deepEqual((await recovered.run(true)).issues, []);
+        const conflict = recovered.conflicts()[0]; assert(conflict);
+        await recovered.resolveConflict(conflict.id,'both');
         const branch = store.list().find(entry => entry.id !== chat.id);
         assert(branch && (await store.items(branch.id)).some(item => item.text.includes('STANDALONE-BRANCH-77')));
         assert((await store.items(chat.id)).some(item => item.text.includes('DESKTOP-PRIVATE-65')));

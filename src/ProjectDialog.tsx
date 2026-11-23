@@ -2,15 +2,22 @@ import { useI18n } from './i18n';
 import { useEffect, useState } from 'react';
 import { FolderOpen, FolderPlus, LoaderCircle, X } from 'lucide-react';
 import { api, message } from './api';
+import { harnesses, type Harness } from '../shared/types';
+import { harnessNames } from '../shared/harnesses';
+import { projectKey } from '../shared/project-path';
 
-export function ProjectDialog({ onClose, onProject }: { onClose(): void; onProject(directory: string): void }) {
+export function ProjectDialog({ defaultOrigin, origins, onClose, onProject }: {
+  defaultOrigin: Harness; origins?: Record<string, Harness>; onClose(): void; onProject(directory: string, origin: Harness): void;
+}) {
   const { t } = useI18n();
   const [mode, setMode] = useState<'open' | 'create'>('open');
   const [paths, setPaths] = useState({ open: '', create: '' });
   const [name, setName] = useState('');
+  const [origin, setOrigin] = useState(defaultOrigin);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const directory = paths[mode];
+  const existingOrigin = mode === 'open' && directory ? origins?.[projectKey(directory)] : undefined;
   useEffect(() => {
     function close(event: KeyboardEvent) { if (event.key === 'Escape' && !busy) onClose(); }
     window.addEventListener('keydown', close);
@@ -31,8 +38,9 @@ export function ProjectDialog({ onClose, onProject }: { onClose(): void; onProje
     setBusy(true);
     setError('');
     try {
-      const project = mode === 'open' ? await api.addProject(directory) : await api.createProject(directory, name);
-      onProject(project);
+      const selectedOrigin = existingOrigin || origin;
+      const project = mode === 'open' ? await api.addProject(directory, selectedOrigin) : await api.createProject(directory, name, selectedOrigin);
+      onProject(project, selectedOrigin);
     } catch (error) { setError(message(error)); }
     finally { setBusy(false); }
   }
@@ -55,7 +63,12 @@ export function ProjectDialog({ onClose, onProject }: { onClose(): void; onProje
               <button type="button" className="secondary-button" disabled={busy} onClick={() => void choose()}><FolderOpen size={15}/>{t("选择目录")}</button>
             </div>
           </label>
-          <p>{mode === 'open' ? t("在此目录中使用 Agent，相关对话会归入这个项目。") : t("将在父目录中创建文件夹，并将它添加到项目列表。")}</p>
+          <label className="form-field">{t("项目原生 Harness")}
+            <select value={existingOrigin || origin} disabled={busy || !!existingOrigin} onChange={event => setOrigin(event.target.value as Harness)}>
+              {harnesses.map(h => <option key={h} value={h}>{harnessNames[h]}</option>)}
+            </select>
+          </label>
+          <p>{t("新对话默认沿用项目归属，可在首次发送前单独选择。")}</p>
           {error && <div className="form-error" role="alert">{t(error)}</div>}
         </div>
         <footer className="dialog-footer">

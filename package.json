@@ -1,6 +1,6 @@
 {
   "name": "entrotect",
-  "version": "0.8.0-beta.2",
+  "version": "0.8.1-beta.1",
   "license": "Apache-2.0",
   "description": "Windows agent workspace with native DeepSeek Harness, ZCode, Kimi Code, OpenCode, and Codex execution",
   "author": "EntroTect",
@@ -22,7 +22,8 @@
     "test:updates": "esbuild tests/runtime-updates.ts --bundle --platform=node --format=esm --outfile=.local/runtime-updates-test.mjs && node --test .local/runtime-updates-test.mjs",
     "test:agents": "esbuild tests/agent-native.ts --bundle --platform=node --format=esm --outfile=.local/agent-native-test.mjs && node --test .local/agent-native-test.mjs",
     "test:store": "node scripts/test-store.mjs",
-    "test:sync": "node scripts/test-sync.mjs"
+    "test:sync": "node scripts/test-sync.mjs",
+    "test:blueprint": "esbuild tests/blueprint.ts tests/blueprint-codex.ts tests/blueprint-relay.ts --bundle --platform=node --format=esm --out-extension:.js=.mjs --outdir=.local/blueprint-tests && node --test .local/blueprint-tests/blueprint.mjs .local/blueprint-tests/blueprint-codex.mjs .local/blueprint-tests/blueprint-relay.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

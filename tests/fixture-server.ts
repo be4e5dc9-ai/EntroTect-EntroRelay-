@@ -1,12 +1,14 @@
 import { createServer } from 'node:http';
 export async function modelFixture() {
-  const requests: { path: string; body: any }[] = [];
+  const requests: { path: string; body: any; authorization?: string }[] = [];
   const usageRequests: { path: string; authorization?: string }[] = [];
   let reply = '第一轮确认完成：ALPHA-731';
   let hold = false;
   let codexContextOverflow = false;
   let nativeAuthorized = true;
   let readFilePath: string | undefined;
+  let authorizeResponse: ((authorization?: string) => boolean | Promise<boolean>) | undefined;
+  const oauthRefreshResponses = new Map<string, object>();
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/api/v0/users/get_user_summary') {
       usageRequests.push({ path: req.url, authorization: req.headers['x-dsh-auth-token'] as string | undefined });
@@ -30,9 +32,18 @@ export async function modelFixture() {
       return;
     }
     let raw = ''; for await (const chunk of req) raw += chunk;
-    const body = raw ? JSON.parse(raw) : {};
-    requests.push({ path: req.url!, body });
+    const body = !raw ? {} : String(req.headers['content-type']).startsWith('application/x-www-form-urlencoded')
+      ? Object.fromEntries(new URLSearchParams(raw)) : JSON.parse(raw);
+    requests.push({ path: req.url!, body, authorization: req.headers.authorization });
+    const refreshResponse = oauthRefreshResponses.get(req.url!);
+    if (refreshResponse) {
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(refreshResponse)); return;
+    }
     if (req.method === 'GET') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ data: [{ id:'deepseek-flash' },{ id:'glm-5.3' }] })); return; }
+    if (req.url?.endsWith('/responses') && authorizeResponse && !await authorizeResponse(req.headers.authorization)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { message: 'Fixture token expired' } }));
+      return;
+    }
     if (codexContextOverflow && req.url?.endsWith('/responses')) {
       res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: {
         type: 'invalid_request_error', code: 'context_length_exceeded', message: 'This model’s maximum context length has been exceeded.',
@@ -71,5 +82,5 @@ export async function modelFixture() {
     }
   });
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
-  return { origin:`http://127.0.0.1:${(server.address() as any).port}`,requests,usageRequests,reply(value: string){reply=value;},hold(value:boolean){hold=value;},codexContextOverflow(value:boolean){codexContextOverflow=value;},readFile(value: string){readFilePath=value;},nativeAuthorized(value:boolean){nativeAuthorized=value;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));} };
+  return { origin:`http://127.0.0.1:${(server.address() as any).port}`,requests,usageRequests,reply(value: string){reply=value;},hold(value:boolean){hold=value;},codexContextOverflow(value:boolean){codexContextOverflow=value;},readFile(value: string){readFilePath=value;},nativeAuthorized(value:boolean){nativeAuthorized=value;},authorizeCodex(value: typeof authorizeResponse){authorizeResponse=value;},refreshOAuth(path: string, value: object){oauthRefreshResponses.set(path, value);},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));} };
 }

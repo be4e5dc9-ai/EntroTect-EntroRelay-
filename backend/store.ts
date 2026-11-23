@@ -1,7 +1,8 @@
 import { appendFile, lstat, mkdir, readFile, realpath, rename, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Conversation, DisplayItem } from '../shared/types';
+import type { Conversation, DisplayItem, Harness } from '../shared/types';
+import { isHarness } from '../shared/harnesses';
 import { projectKey } from '../shared/project-path';
 
 export async function atomicJson(file: string, data: unknown, expectedContent?: string | null) {
@@ -33,6 +34,8 @@ export class Store {
   readonly conversations = new Map<string, Conversation>();
   private writes = new Map<string, Promise<unknown>>();
   private registeredProjects: string[] = [];
+  readonly projectOrigins: Record<string,Harness> = {};
+  readonly projectLocations: Record<string,string> = {};
   constructor(readonly root: string) {}
   directory(id: string) { if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('无效的对话 ID'); return path.join(this.root, 'conversations', id); }
   async init() {
@@ -47,12 +50,18 @@ export class Store {
       }
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     try {
-      const saved: string[] = JSON.parse(await readFile(path.join(this.root, 'projects.json'), 'utf8'));
-      this.registeredProjects = saved.filter(directory => typeof directory === 'string' && path.isAbsolute(directory));
+      const saved: (string | {workspace: string; origin: Harness; location?: string})[] = JSON.parse(await readFile(path.join(this.root, 'projects.json'), 'utf8'));
+      for (const entry of saved) {
+        const directory = typeof entry === 'string' ? entry : entry?.workspace;
+        if (typeof directory !== 'string' || !path.isAbsolute(directory)) continue;
+        this.registeredProjects.push(directory);
+        if (typeof entry === 'object' && isHarness(entry.origin)) this.projectOrigins[projectKey(directory)] = entry.origin;
+        if (typeof entry === 'object' && entry.location && path.isAbsolute(entry.location)) this.projectLocations[projectKey(directory)] = entry.location;
+      }
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
   projects() { return [...this.registeredProjects]; }
-  async addProject(workspace: string) {
+  async addProject(workspace: string, origin?: Harness, location?: string) {
     if (typeof workspace !== 'string' || !path.isAbsolute(workspace) || !(await stat(workspace).catch(() => null))?.isDirectory()) {
       throw new Error('请选择有效的项目目录');
     }
@@ -60,14 +69,21 @@ export class Store {
     return this.queue('projects', async () => {
       const key = projectKey(directory);
       const existing = this.registeredProjects.find(project => projectKey(project) === key);
-      if (existing) return existing;
-      const projects = [directory, ...this.registeredProjects];
-      await atomicJson(path.join(this.root, 'projects.json'), projects);
+      if (existing && (!origin || this.projectOrigins[key])) return existing;
+      const projects = existing ? this.registeredProjects : [directory, ...this.registeredProjects];
+      const origins = { ...this.projectOrigins, ...(origin && { [key]: origin }) };
+      const locations = { ...this.projectLocations, ...(location && { [key]: location }) };
+      await atomicJson(path.join(this.root, 'projects.json'), projects.map(workspace => {
+        const value = origins[projectKey(workspace)];
+        return value ? {workspace, origin:value, location:locations[projectKey(workspace)]} : workspace;
+      }));
+      if (origin) this.projectOrigins[key] = origin;
+      if (location) this.projectLocations[key] = location;
       this.registeredProjects = projects;
       return directory;
     });
   }
-  async createProject(parent: string, name: string) {
+  async createProject(parent: string, name: string, origin?: Harness, location?: string) {
     if (typeof parent !== 'string' || !path.isAbsolute(parent) || !(await stat(parent).catch(() => null))?.isDirectory()) {
       throw new Error('请选择有效的上级目录');
     }
@@ -81,7 +97,7 @@ export class Store {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('该目录已存在，可在「打开目录」中选择它');
       throw error;
     }
-    try { return await this.addProject(directory); }
+    try { return await this.addProject(directory,origin,location); }
     catch (error) {
       // Only undo the empty directory created by this request.
       await rmdir(directory).catch(() => {});
@@ -90,6 +106,13 @@ export class Store {
   }
   get(id: string) { const c = this.conversations.get(id); if (!c) throw new Error('对话不存在'); return c; }
   list() { return [...this.conversations.values()].sort((a, b) => b.updatedAt - a.updatedAt); }
+  async restoreOrigins(origins: ReadonlyMap<string,NonNullable<Conversation['origin']>>) {
+    await this.queue('index',async()=>{
+      const rows=this.list().map(c=>origins.has(c.id) ? {...c,origin:origins.get(c.id)} : c);
+      await atomicJson(path.join(this.root,'conversations.json'),rows);
+      for (const [id,origin] of origins) this.get(id).origin=origin;
+    });
+  }
   async save(conversation: Conversation) {
     this.conversations.set(conversation.id, conversation);
     await this.queue('index', () => atomicJson(path.join(this.root, 'conversations.json'), this.list()));

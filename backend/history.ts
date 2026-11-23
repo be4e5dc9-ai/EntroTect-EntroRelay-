@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, open, readFile, readdir, rmdir, stat, unlink } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rmdir, stat, unlink } from 'node:fs/promises';
 import { zstdCompressSync } from 'node:zlib';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -10,15 +10,16 @@ import { atomicFile, atomicJson } from './store';
 import { Controller } from './controller';
 import { nativeSqlite } from './native-sqlite';
 import { textBlocks } from './projection';
-import { deepSeekHeader, deepSeekLog, deepSeekTranscript as transcript, dshProjectKey } from './dsh-files';
-import { deepSeekArchive } from './dsh-context';
+import { deepSeekHeader, deepSeekLog, deepSeekTranscript as transcript, dshProjectKey, lockDeepSeekRegistry } from './dsh-files';
+import { readZCodeContext } from './zcode-context';
+import { deepSeekArchive, readDeepSeekContext } from './dsh-context';
 import { RpcError } from './rpc';
 
 type DshSession = NativeHistory & { file: string; header: any };
 export interface SyncProvenance { profile: string; appId: string; revision: number; fingerprint?: string; }
 type AgentMarker = SyncProvenance & { pending?: SyncProvenance & { content: string; structured?: true } };
 export interface NativeCommitState { externalOpen: boolean; codexWriters?: (string | null)[]; }
-export interface SyncPublish { sessionId: string; expectedFingerprint: string | null; provenance: SyncProvenance; canCommit?():Promise<NativeCommitState | void>; }
+export interface SyncPublish { sessionId: string; expectedFingerprint: string | null; provenance: SyncProvenance; canCommit?():Promise<NativeCommitState | void>; allocated?(id: string): Promise<void>; replace?: boolean; }
 const digest = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 async function json(file: string) { return JSON.parse(await readFile(file, 'utf8')); }
@@ -38,10 +39,11 @@ async function scanDsh(home: string): Promise<{ sessions: DshSession[]; warnings
         const header = await deepSeekHeader(file);
         if (header.type !== 'session' || !header.id) throw new Error('不支持的原生日志头');
         if (header.origin === 'subagent' || header.isSeeded) continue;
+        const provenance = await optionalJson(path.join(directory, 'entrotect-sync.json'), undefined);
         const cache = await optionalJson(path.join(home, 'storages', 'session_projcache', 'sessions', `${header.id}.json`), null);
         const info = await stat(file);
         const title = cache?.record?.rows?.title?.val;
-        sessions.push({ id: header.id, title: typeof title === 'string' && title.trim() ? title : '未命名对话', workspace: header.cwd || '', createdAt: header.createdAt || info.birthtimeMs, updatedAt: info.mtimeMs, version:`${info.size}:${info.mtimeMs}:${title??''}`, file, header });
+        sessions.push({ id: header.id, title: typeof title === 'string' && title.trim() ? title : '未命名对话', workspace: header.cwd || '', createdAt: header.createdAt || info.birthtimeMs, updatedAt: info.mtimeMs, version:`${info.size}:${info.mtimeMs}:${title??''}`, file, header, provenance });
       } catch (e) { warnings.push(`${entry.name}：${(e as Error).message}`); }
     }
   }
@@ -145,7 +147,14 @@ export class HistoryService {
     const source = this.source(value);
     if (isAgentHarness(source.harness)) {
       if (!(await stat(source.location).catch(() => undefined))?.isDirectory()) throw new Error('原生历史目录不存在');
-      return { source, sessions: await this.controller.agents.list(source.harness, source.location), warnings: [] };
+      const sessions = await this.controller.agents.list(source.harness, source.location);
+      for (let offset = 0; offset < sessions.length; offset += 32) {
+        await Promise.all(sessions.slice(offset, offset + 32).map(async entry => {
+          const marker: AgentMarker | undefined = await optionalJson(this.agentMarker(source, entry.id), undefined);
+          if (marker?.appId || marker?.pending?.appId) entry.provenance = marker.appId ? marker : marker.pending;
+        }));
+      }
+      return { source, sessions, warnings: [] };
     }
     if (source.harness === 'deepseek') {
       const found = await scanDsh(source.location);
@@ -171,14 +180,29 @@ export class HistoryService {
     await (await import('node:fs/promises')).writeFile(file, encoded, { flag: 'wx' });
     return { rows, file };
   }
-  async import(request: HistoryImport, existing?: Conversation, automatic=false, knownEntry?: NativeHistory) {
+  async archive(source: NativeHistorySource, entry: NativeHistory) {
+    const native = isAgentHarness(source.harness)
+      ? await this.controller.agents.read(source.harness, source.location, entry.workspace, entry.id)
+      : source.harness === 'zcode'
+        ? await readZCodeContext(this.controller.settings.node, source.location, entry.id)
+        : await readDeepSeekContext(source.location, entry.workspace, entry.id, entry.createdAt);
+    return messagesToBridge(native.history, { id: entry.id, title: entry.title, cwd: entry.workspace,
+      createdAt: entry.createdAt, updatedAt: entry.updatedAt, source: source.harness }, 'retained' in native ? native.retained : undefined);
+  }
+
+  async import(request: HistoryImport, existing?: Conversation, automatic=false, knownEntry?: NativeHistory, branch?: Pick<Conversation,'id'|'origin'>) {
     const source = this.source(request.source), entry = knownEntry ?? (await this.list(source)).sessions.find(s => s.id === request.sessionId);
     if (!entry) throw new Error('来源会话已不存在，请刷新列表');
     const originalWorkspace = request.workspace?.trim() || entry.workspace;
     const workspace = originalWorkspace&&path.isAbsolute(originalWorkspace)?originalWorkspace:os.homedir();
     const valid=!!originalWorkspace&&path.isAbsolute(originalWorkspace)&&!!(await stat(originalWorkspace).catch(()=>null))?.isDirectory();
     if (!valid&&!automatic) throw new Error('原项目目录不存在，请为此对话选择工作目录');
-    const now = Date.now(), c: Conversation = { ...existing, id: existing?.id||randomUUID(), title: entry.title, workspace, workspaceMissing:!valid, harness: source.harness, modelId:existing?.harness===source.harness?existing.modelId:undefined, createdAt: existing?.createdAt||entry.createdAt||now, updatedAt: automatic?entry.updatedAt:now, revision: (existing?.revision||0)+1, state: 'idle', bindings: {...existing?.bindings}, importedFrom: existing?.importedFrom??{ ...source, sessionId: entry.id, importedAt: now } };
+    const now = Date.now(), c: Conversation = { ...existing, id: existing?.id||branch?.id||randomUUID(), title: entry.title, workspace, workspaceMissing:!valid, harness: source.harness, modelId:existing?.harness===source.harness?existing.modelId:undefined, createdAt: existing?.createdAt||entry.createdAt||now, updatedAt: automatic?entry.updatedAt:now, revision: (existing?.revision||0)+1, state: 'idle', bindings: {...existing?.bindings}, origin: existing?.origin ?? (existing?.importedFrom ? {source:existing.importedFrom,sessionId:existing.importedFrom.sessionId,workspace:existing.workspace} : { source, sessionId: entry.id, workspace:entry.workspace }), importedFrom: existing?.importedFrom??{ ...source, sessionId: entry.id, importedAt: now } };
+    if (branch) {
+      c.origin = branch.origin;
+      c.title += '（独立端分支）';
+      delete c.importedFrom;
+    }
     let items: DisplayItem[];
     try {
     // A retained process may hold the previous version of this native session.
@@ -194,7 +218,7 @@ export class HistoryService {
       const runtimeLocation = this.controller.agents.location(source.harness);
       const sameProfile = valid && samePath(source.location, runtimeLocation) && samePath(entry.workspace, workspace);
       const sameBinding = previous?.sessionId === entry.id && previous.location && samePath(previous.location, source.location);
-      const codexOriginal = source.harness === 'codex' && !existing && sameProfile && !this.controller.store.list().some(chat => {
+      const codexOriginal = source.harness === 'codex' && !existing && !branch && sameProfile && !this.controller.store.list().some(chat => {
         const binding = chat.bindings.codex;
         return binding?.sessionId === entry.id && binding.location && samePath(binding.location, source.location);
       });
@@ -254,21 +278,25 @@ export class HistoryService {
         let sessionId = sync?.sessionId;
         const shared = !!(sync && !sessionId && current?.location && samePath(current.location, target.location) && current.revision === c.revision);
         const messages = bridgeEntries(await json(c.canonicalPath!), sync ? 'archive' : 'resume');
-        let expectedHistory = messages;
+        let expectedHistory: readonly (typeof messages)[number][] = messages;
         if (!messages.length) throw new Error('没有可导出的对话消息');
         if (sync?.expectedFingerprint && sessionId) {
+          if (harness === 'codex' && sync.replace) await this.controller.releaseRuntime(c.id);
           const markerFile = this.agentMarker(target, sessionId);
           const previous = await optionalJson(markerFile, undefined);
           expectedHistory = await agents.append(c, harness, target.location, sessionId, sync.expectedFingerprint, messages, async result => {
             const activity = await sync.canCommit?.();
             await atomicJson(markerFile, { ...previous, pending: { ...sync.provenance, content: portableHistoryFingerprint(result), structured: true } });
             return activity;
-          });
+          }, sync.replace);
         } else if (shared) {
           sessionId = current!.sessionId;
         } else {
           await sync?.canCommit?.();
-          const binding = await agents.import({ ...c, modelId: target.harness === c.harness ? c.modelId : undefined }, harness, c.canonicalPath!, target.location, sync ? 'archive' : 'resume', true);
+          const binding = await agents.import({ ...c, modelId: target.harness === c.harness ? c.modelId : undefined }, harness, c.canonicalPath!, target.location, sync ? 'archive' : 'resume', true, async id => {
+            await sync?.allocated?.(id);
+            if (sync) await atomicJson(this.agentMarker(target, id), { pending: { ...sync.provenance, content: portableHistoryFingerprint(messages), structured: true } });
+          }, sessionId || undefined);
           sessionId = binding.sessionId;
         }
         const native = await agents.read(harness, target.location, c.workspace, sessionId);
@@ -285,7 +313,7 @@ export class HistoryService {
       stagingId=candidate.id;
       if (target.harness === 'zcode') await this.controller.initializeDatabase(candidate);
       let dshFile = '', stagedId = '';
-      if (target.harness === c.harness) {
+      if (target.harness === c.harness && c.bindings[target.harness]?.revision === c.revision) {
         if (target.harness === 'deepseek') {
           const found = await scanDsh(path.join(this.controller.codec.nativeRoot(c), 'deepseek'));
           const original = found.sessions.find(s => s.id === c.bindings.deepseek!.sessionId);
@@ -327,7 +355,7 @@ export class HistoryService {
     if (original && !sync?.canCommit && (await this.inspect({harness:'deepseek',location:home},id)).busy) throw new Error('独立 DeepSeek 会话仍在运行');
     const storage = path.join(home, 'storages'), registry = path.join(storage, 'workspace.json');
     await mkdir(storage, { recursive: true });
-    const lockPath = `${registry}.entrotect.lock`, lock = await open(lockPath, 'wx').catch(() => { throw new Error('另一次导出正在更新 DeepSeek 项目索引，请稍后重试'); });
+    const unlock = await lockDeepSeekRegistry(registry);
     let backup: string | undefined, createdFile = '', committed = false, publishedHash = '';
     const cacheFile = path.join(storage, 'session_projcache', 'sessions', `${id}.json`);
     try {
@@ -373,7 +401,7 @@ export class HistoryService {
         const current=await readFile(createdFile).catch(()=>null);
         if(current&&digest(current)===publishedHash){await unlink(createdFile).catch(()=>{});await unlink(cacheFile).catch(()=>{});await unlink(path.join(path.dirname(createdFile),'entrotect-sync.json')).catch(()=>{});await rmdir(path.dirname(createdFile)).catch(()=>{});}
       }
-      await lock.close(); await unlink(lockPath);
+      await unlock();
     }
   }
 }

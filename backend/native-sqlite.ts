@@ -58,7 +58,8 @@ if(p.action==='readContext'){
 }
 if(p.action==='list'){
  src.exec('BEGIN');const rows=src.prepare('select id,title,directory as workspace,time_created as createdAt,time_updated as updatedAt from session where time_deleted is null order by time_updated desc').all();
- for(const row of rows){const data=readRows(src,row.id);row.version=fingerprint(data);row.busy=busy(src,row.id,data);}src.exec('COMMIT');src.close();console.log(JSON.stringify(rows));return;
+ const markers=new Map(src.prepare("select session_id,data from session_entry where type='integration/entrotect'").all().map(row=>[row.session_id,JSON.parse(row.data)]));
+ for(const row of rows){row.provenance=markers.get(row.id);}src.exec('COMMIT');src.close();console.log(JSON.stringify(rows));return;
 }
 src.exec('BEGIN');
 const rows=readRows(src,p.sessionId);
